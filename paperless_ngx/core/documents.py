@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from paperless_ngx.utils.paperless_backend import PaperlessBackend
 
@@ -17,7 +17,7 @@ def list_documents(
     doc_type: str | None = None,
     page_size: int = 25,
     page: int = 1,
-) -> dict:
+) -> dict[str, Any]:
     """List documents with optional filters.
 
     Args:
@@ -46,10 +46,10 @@ def list_documents(
     if doc_type:
         params["document_type__name__icontains"] = doc_type
 
-    return backend.get("documents/", params=params)
+    return cast(dict[str, Any], backend.get("documents/", params=params))
 
 
-def get_document(backend: PaperlessBackend, doc_id: int) -> dict:
+def get_document(backend: PaperlessBackend, doc_id: int) -> dict[str, Any]:
     """Get a single document by ID.
 
     Args:
@@ -59,7 +59,7 @@ def get_document(backend: PaperlessBackend, doc_id: int) -> dict:
     Returns:
         Document metadata dict.
     """
-    return backend.get(f"documents/{doc_id}/")
+    return cast(dict[str, Any], backend.get(f"documents/{doc_id}/"))
 
 
 def upload_document(
@@ -69,7 +69,7 @@ def upload_document(
     correspondent_id: int | None = None,
     document_type_id: int | None = None,
     tag_ids: list[int] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Upload a document file to Paperless-ngx.
 
     Args:
@@ -100,7 +100,10 @@ def upload_document(
 
     with open(file_path, "rb") as f:
         files = {"document": (path.name, f, _guess_mime(path))}
-        return backend.post("documents/post_document/", data=data, files=files)
+        return cast(
+            dict[str, Any],
+            backend.post("documents/post_document/", data=data, files=files),
+        )
 
 
 def download_document(
@@ -151,7 +154,7 @@ def update_document(
     tag_ids: list[int] | None = None,
     created: str | None = None,
     custom_fields: list[dict] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Update document metadata.
 
     Args:
@@ -184,7 +187,7 @@ def update_document(
     if not patch:
         raise ValueError("No fields to update provided.")
 
-    return backend.patch(f"documents/{doc_id}/", data=patch)
+    return cast(dict[str, Any], backend.patch(f"documents/{doc_id}/", data=patch))
 
 
 def delete_document(backend: PaperlessBackend, doc_id: int) -> None:
@@ -201,7 +204,7 @@ def search_documents(
     backend: PaperlessBackend,
     query: str,
     page_size: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Full-text search documents.
 
     Args:
@@ -212,8 +215,10 @@ def search_documents(
     Returns:
         Dict with 'count' and 'results'.
     """
-    return backend.get("documents/", params={"query": query,
-                                              "page_size": page_size})
+    return cast(
+        dict[str, Any],
+        backend.get("documents/", params={"query": query, "page_size": page_size}),
+    )
 
 
 def _guess_mime(path: Path) -> str:
@@ -231,7 +236,9 @@ def _guess_mime(path: Path) -> str:
         ".txt": "text/plain",
         ".csv": "text/csv",
         ".odt": "application/vnd.oasis.opendocument.text",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".docx": (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
     return mime_map.get(ext, "application/octet-stream")

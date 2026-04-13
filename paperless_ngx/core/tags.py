@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from paperless_ngx.utils.paperless_backend import PaperlessBackend
 
 
@@ -22,7 +24,7 @@ def create_tag(
     name: str,
     color: str = "#a6cee3",
     is_inbox_tag: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Create a new tag.
 
     Args:
@@ -34,11 +36,17 @@ def create_tag(
     Returns:
         Created tag dict.
     """
-    return backend.post("tags/", data={
-        "name": name,
-        "color": color,
-        "is_inbox_tag": is_inbox_tag,
-    })
+    return cast(
+        dict[str, Any],
+        backend.post(
+            "tags/",
+            data={
+                "name": name,
+                "color": color,
+                "is_inbox_tag": is_inbox_tag,
+            },
+        ),
+    )
 
 
 def delete_tag(backend: PaperlessBackend, tag_id: int) -> None:
@@ -51,7 +59,7 @@ def delete_tag(backend: PaperlessBackend, tag_id: int) -> None:
     backend.delete(f"tags/{tag_id}/")
 
 
-def get_tag(backend: PaperlessBackend, tag_id: int) -> dict:
+def get_tag(backend: PaperlessBackend, tag_id: int) -> dict[str, Any]:
     """Get a single tag by ID.
 
     Args:
@@ -61,4 +69,4 @@ def get_tag(backend: PaperlessBackend, tag_id: int) -> dict:
     Returns:
         Tag dict.
     """
-    return backend.get(f"tags/{tag_id}/")
+    return cast(dict[str, Any], backend.get(f"tags/{tag_id}/"))

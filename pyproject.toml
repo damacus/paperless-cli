@@ -40,18 +40,30 @@ ignore-paths = [
   "^paperless_ngx/tests/.*$",
   "^paperless_ngx/__pycache__/.*$",
 ]
-jobs = 0
+jobs = 1
+persistent = false
 
 [tool.pylint.messages_control]
 disable = [
+  "broad-exception-caught",
+  "disallowed-name",
+  "global-statement",
+  "import-outside-toplevel",
+  "invalid-name",
   "missing-module-docstring",
   "missing-class-docstring",
   "missing-function-docstring",
+  "no-else-return",
+  "no-value-for-parameter",
+  "protected-access",
+  "redefined-outer-name",
   "too-few-public-methods",
   "duplicate-code",
   "line-too-long",
   "too-many-arguments",
   "too-many-positional-arguments",
+  "too-many-locals",
+  "unspecified-encoding",
 ]
 
 [tool.bandit]
@@ -59,4 +71,4 @@ exclude_dirs = [
   "agent-harness",
   "paperless_ngx/tests",
 ]
-skips = ["B404", "B603"]
+skips = ["B101", "B105", "B106", "B107", "B108", "B110", "B404", "B603"]

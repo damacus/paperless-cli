@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-from paperless_ngx.utils.paperless_backend import PaperlessBackend
 from paperless_ngx.core.documents import download_document
+from paperless_ngx.utils.paperless_backend import PaperlessBackend
 
 
 def bulk_download(
@@ -46,12 +45,14 @@ def bulk_download(
             )
             results.append({"doc_id": doc_id, "path": path, "status": "ok"})
         except Exception as exc:
-            results.append({
-                "doc_id": doc_id,
-                "path": None,
-                "status": "error",
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "doc_id": doc_id,
+                    "path": None,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
 
     if progress_callback:
         progress_callback(total, total, None)
@@ -87,6 +88,7 @@ def bulk_download_zip(
         stream=True,
     )
     from paperless_ngx.utils.paperless_backend import _check_response
+
     _check_response(resp)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

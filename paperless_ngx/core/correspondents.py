@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from paperless_ngx.utils.paperless_backend import PaperlessBackend
 
 
@@ -22,7 +24,7 @@ def create_correspondent(
     name: str,
     match: str = "",
     matching_algorithm: int = 0,
-) -> dict:
+) -> dict[str, Any]:
     """Create a new correspondent.
 
     Args:
@@ -34,11 +36,17 @@ def create_correspondent(
     Returns:
         Created correspondent dict.
     """
-    return backend.post("correspondents/", data={
-        "name": name,
-        "match": match,
-        "matching_algorithm": matching_algorithm,
-    })
+    return cast(
+        dict[str, Any],
+        backend.post(
+            "correspondents/",
+            data={
+                "name": name,
+                "match": match,
+                "matching_algorithm": matching_algorithm,
+            },
+        ),
+    )
 
 
 def delete_correspondent(backend: PaperlessBackend, correspondent_id: int) -> None:
@@ -51,7 +59,9 @@ def delete_correspondent(backend: PaperlessBackend, correspondent_id: int) -> No
     backend.delete(f"correspondents/{correspondent_id}/")
 
 
-def get_correspondent(backend: PaperlessBackend, correspondent_id: int) -> dict:
+def get_correspondent(
+    backend: PaperlessBackend, correspondent_id: int
+) -> dict[str, Any]:
     """Get a single correspondent by ID.
 
     Args:
@@ -61,4 +71,4 @@ def get_correspondent(backend: PaperlessBackend, correspondent_id: int) -> dict:
     Returns:
         Correspondent dict.
     """
-    return backend.get(f"correspondents/{correspondent_id}/")
+    return cast(dict[str, Any], backend.get(f"correspondents/{correspondent_id}/"))

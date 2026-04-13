@@ -43,24 +43,24 @@ SKIP_E2E = pytest.mark.skipif(
 def _resolve_cli(name: str = "paperless") -> str:
     """Locate the CLI entry point.
 
-    Searches shutil.which first, then the current Python env's bin directory.
+    Searches the current Python env's bin directory first, then shutil.which.
     Raises RuntimeError if not found.
     """
-    path = shutil.which(name)
-    if path:
-        return path
-    # Check the bin/ dir next to the current interpreter
     candidate = Path(sys.executable).parent / name
     if candidate.exists():
         return str(candidate)
+    path = shutil.which(name)
+    if path:
+        return path
     raise RuntimeError(
         f"'{name}' not found on PATH. "
         "Install with: pip install -e /path/to/paperless-cli"
     )
 
 
-def _run_cli(*args: str, extra_env: dict | None = None,
-             timeout: int = 30) -> subprocess.CompletedProcess:
+def _run_cli(
+    *args: str, extra_env: dict | None = None, timeout: int = 30
+) -> subprocess.CompletedProcess:
     """Run the CLI as a subprocess with a clean, reproducible environment.
 
     Args:
@@ -96,8 +96,10 @@ def _run_cli(*args: str, extra_env: dict | None = None,
 def _make_backend():
     """Create a PaperlessBackend pointed at the live test server."""
     from paperless_ngx.utils.paperless_backend import (
-        PaperlessBackend, PaperlessConfig,
+        PaperlessBackend,
+        PaperlessConfig,
     )
+
     return PaperlessBackend(
         config=PaperlessConfig(url=PAPERLESS_URL, token=PAPERLESS_TOKEN)
     )
@@ -133,8 +135,9 @@ class TestE2EWorkflow:
 
     def test_ping(self):
         """Server should respond to ping within a reasonable time."""
-        from paperless_ngx.utils.paperless_backend import save_config
         from paperless_ngx.core.project import ping_server
+        from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = ping_server()
         assert result["status"] == "ok"
@@ -144,6 +147,7 @@ class TestE2EWorkflow:
     def test_list_documents_returns_paginated_structure(self):
         """Document list endpoint returns DRF pagination shape."""
         from paperless_ngx.core.documents import list_documents
+
         backend = _make_backend()
         result = list_documents(backend, page_size=5)
         assert "count" in result
@@ -154,6 +158,7 @@ class TestE2EWorkflow:
     def test_list_documents_ordering(self):
         """Documents should be returned in reverse-created order by default."""
         from paperless_ngx.core.documents import list_documents
+
         backend = _make_backend()
         result = list_documents(backend, page_size=3)
         # We can only verify structure when there are documents
@@ -164,9 +169,13 @@ class TestE2EWorkflow:
     def test_upload_and_delete_full_cycle(self):
         """Upload a PDF, wait for it to appear, then delete it."""
         import time
+
         from paperless_ngx.core.documents import (
-            list_documents, upload_document, delete_document,
+            delete_document,
+            list_documents,
+            upload_document,
         )
+
         backend = _make_backend()
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
@@ -175,9 +184,7 @@ class TestE2EWorkflow:
 
         doc_id = None
         try:
-            result = upload_document(
-                backend, tmp_path, title="CLI E2E Test Document"
-            )
+            result = upload_document(backend, tmp_path, title="CLI E2E Test Document")
             assert result  # truthy — task id or similar
 
             # Wait up to 15s for async consumer to process the document
@@ -202,6 +209,7 @@ class TestE2EWorkflow:
     def test_search_returns_valid_structure(self):
         """Full-text search should return a paginated response."""
         from paperless_ngx.core.documents import search_documents
+
         backend = _make_backend()
         result = search_documents(backend, "document", page_size=3)
         assert "count" in result
@@ -210,6 +218,7 @@ class TestE2EWorkflow:
     def test_list_tags_returns_list(self):
         """Tag list should return a Python list."""
         from paperless_ngx.core.tags import list_tags
+
         backend = _make_backend()
         result = list_tags(backend)
         assert isinstance(result, list)
@@ -217,8 +226,11 @@ class TestE2EWorkflow:
     def test_tag_lifecycle(self):
         """Create → get → delete a tag."""
         from paperless_ngx.core.tags import (
-            create_tag, get_tag, delete_tag,
+            create_tag,
+            delete_tag,
+            get_tag,
         )
+
         backend = _make_backend()
         unique_name = "cli-e2e-test-tag-" + os.urandom(4).hex()
 
@@ -238,8 +250,11 @@ class TestE2EWorkflow:
     def test_correspondent_lifecycle(self):
         """Create → get → delete a correspondent."""
         from paperless_ngx.core.correspondents import (
-            create_correspondent, get_correspondent, delete_correspondent,
+            create_correspondent,
+            delete_correspondent,
+            get_correspondent,
         )
+
         backend = _make_backend()
         name = "CLI E2E Correspondent " + os.urandom(4).hex()
 
@@ -258,8 +273,11 @@ class TestE2EWorkflow:
     def test_doctype_lifecycle(self):
         """Create → get → delete a document type."""
         from paperless_ngx.core.doc_types import (
-            create_doc_type, get_doc_type, delete_doc_type,
+            create_doc_type,
+            delete_doc_type,
+            get_doc_type,
         )
+
         backend = _make_backend()
         name = "CLI E2E DocType " + os.urandom(4).hex()
 
@@ -298,16 +316,22 @@ class TestCLISubprocess:
         """--help exits 0 and lists all command groups."""
         result = _run_cli("--help")
         assert result.returncode == 0
-        for group in ("document", "tag", "correspondent",
-                      "doctype", "project", "export", "status"):
+        for group in (
+            "document",
+            "tag",
+            "correspondent",
+            "doctype",
+            "project",
+            "export",
+            "status",
+        ):
             assert group in result.stdout
 
     def test_document_help(self):
         """document --help lists all document subcommands."""
         result = _run_cli("document", "--help")
         assert result.returncode == 0
-        for sub in ("list", "get", "upload", "download",
-                    "update", "delete", "search"):
+        for sub in ("list", "get", "upload", "download", "update", "delete", "search"):
             assert sub in result.stdout
 
     def test_tag_help(self):
@@ -329,7 +353,8 @@ class TestCLISubprocess:
     def test_no_config_document_list_exits_nonzero(self, tmp_path):
         """document list with no config file should exit non-zero."""
         result = _run_cli(
-            "document", "list",
+            "document",
+            "list",
             extra_env={"HOME": str(tmp_path)},
         )
         assert result.returncode != 0
@@ -337,7 +362,8 @@ class TestCLISubprocess:
     def test_no_config_shows_project_init_instruction(self, tmp_path):
         """Error output must mention 'project init'."""
         result = _run_cli(
-            "document", "list",
+            "document",
+            "list",
             extra_env={"HOME": str(tmp_path)},
         )
         combined = result.stdout + result.stderr
@@ -346,7 +372,8 @@ class TestCLISubprocess:
     def test_no_config_tag_list_exits_nonzero(self, tmp_path):
         """tag list with no config should exit non-zero."""
         result = _run_cli(
-            "tag", "list",
+            "tag",
+            "list",
             extra_env={"HOME": str(tmp_path)},
         )
         assert result.returncode != 0
@@ -364,7 +391,8 @@ class TestCLISubprocess:
     def test_status_json_no_config(self, tmp_path):
         """status --json with no config returns valid JSON with connected=false."""
         result = _run_cli(
-            "status", "--json",
+            "status",
+            "--json",
             extra_env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0
@@ -378,6 +406,7 @@ class TestCLISubprocess:
     def test_status_json_connected(self):
         """status --json returns connected=true when config is set."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("status", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -389,6 +418,7 @@ class TestCLISubprocess:
     def test_document_list_json_returns_paginated(self):
         """document list --json returns {count, results} structure."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("document", "list", "--json", "--page-size", "5")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -401,6 +431,7 @@ class TestCLISubprocess:
     def test_document_search_json(self):
         """document search --json returns {count, results}."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("document", "search", "the", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -411,6 +442,7 @@ class TestCLISubprocess:
     def test_tag_list_json_returns_list(self):
         """tag list --json returns a JSON array."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("tag", "list", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -421,6 +453,7 @@ class TestCLISubprocess:
     def test_correspondent_list_json_returns_list(self):
         """correspondent list --json returns a JSON array."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("correspondent", "list", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -431,6 +464,7 @@ class TestCLISubprocess:
     def test_doctype_list_json_returns_list(self):
         """doctype list --json returns a JSON array."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("doctype", "list", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -441,6 +475,7 @@ class TestCLISubprocess:
     def test_global_json_flag(self):
         """--json at root level propagates to subcommand output."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("--json", "document", "list", "--page-size", "3")
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -451,6 +486,7 @@ class TestCLISubprocess:
     def test_project_ping_json(self):
         """project ping --json returns {status: ok}."""
         from paperless_ngx.utils.paperless_backend import save_config
+
         save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
         result = _run_cli("project", "ping", "--json")
         assert result.returncode == 0, f"stderr: {result.stderr}"

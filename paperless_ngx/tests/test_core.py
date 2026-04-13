@@ -9,47 +9,52 @@ Config and session files are isolated to tmp_path by conftest.py (autouse).
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, patch, call
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import responses as resp_lib
 from click.testing import CliRunner
 
 import paperless_ngx.utils.paperless_backend as be_mod
+from paperless_ngx.core.correspondents import (
+    create_correspondent,
+    delete_correspondent,
+    get_correspondent,
+    list_correspondents,
+)
+from paperless_ngx.core.doc_types import (
+    create_doc_type,
+    delete_doc_type,
+    get_doc_type,
+    list_doc_types,
+)
+from paperless_ngx.core.documents import (
+    _guess_mime,
+    delete_document,
+    download_document,
+    get_document,
+    list_documents,
+    search_documents,
+    update_document,
+    upload_document,
+)
+from paperless_ngx.core.session import Session
+from paperless_ngx.core.tags import (
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+)
+from paperless_ngx.paperless_ngx_cli import main
 from paperless_ngx.utils.paperless_backend import (
     PaperlessBackend,
     PaperlessConfig,
     find_paperless_server,
+    load_session,
     save_config,
     save_session,
-    load_session,
 )
-from paperless_ngx.core.documents import (
-    list_documents,
-    get_document,
-    upload_document,
-    download_document,
-    update_document,
-    delete_document,
-    search_documents,
-    _guess_mime,
-)
-from paperless_ngx.core.tags import (
-    list_tags, create_tag, delete_tag, get_tag,
-)
-from paperless_ngx.core.correspondents import (
-    list_correspondents, create_correspondent, delete_correspondent,
-    get_correspondent,
-)
-from paperless_ngx.core.doc_types import (
-    list_doc_types, create_doc_type, delete_doc_type, get_doc_type,
-)
-from paperless_ngx.core.session import Session
-from paperless_ngx.paperless_ngx_cli import main
-
 
 BASE_URL = "http://paperless.test"
 
@@ -65,8 +70,9 @@ def make_backend() -> PaperlessBackend:
     return PaperlessBackend(config=make_config())
 
 
-def write_config(tmp_path_or_path: str | Path, url: str = BASE_URL,
-                 token: str = "testtoken123"):
+def write_config(
+    tmp_path_or_path: str | Path, url: str = BASE_URL, token: str = "testtoken123"
+):
     """Write a valid config.json to the mocked CONFIG_PATH."""
     # be_mod.CONFIG_PATH is already redirected by conftest autouse fixture
     p = Path(be_mod.CONFIG_PATH)
@@ -180,16 +186,19 @@ class TestSessionPersistence:
 class TestPaperlessBackend:
     @resp_lib.activate
     def test_get_success(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 1, "results": [{"id": 1}]}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 1, "results": [{"id": 1}]},
+            status=200,
+        )
         backend = make_backend()
         data = backend.get("documents/")
         assert data["count"] == 1
 
     @resp_lib.activate
     def test_get_sends_auth_header(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={}, status=200)
+        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/", json={}, status=200)
         backend = make_backend()
         backend.get("documents/")
         req = resp_lib.calls[0].request
@@ -197,48 +206,72 @@ class TestPaperlessBackend:
 
     @resp_lib.activate
     def test_get_401_raises(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"detail": "auth error"}, status=401)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"detail": "auth error"},
+            status=401,
+        )
         backend = make_backend()
         with pytest.raises(RuntimeError, match="Authentication failed"):
             backend.get("documents/")
 
     @resp_lib.activate
     def test_get_403_raises(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/1/",
-                     json={"detail": "forbidden"}, status=403)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/",
+            json={"detail": "forbidden"},
+            status=403,
+        )
         backend = make_backend()
         with pytest.raises(RuntimeError, match="Permission denied"):
             backend.get("documents/1/")
 
     @resp_lib.activate
     def test_get_404_raises(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/999/",
-                     json={"detail": "not found"}, status=404)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/999/",
+            json={"detail": "not found"},
+            status=404,
+        )
         backend = make_backend()
         with pytest.raises(RuntimeError, match="not found"):
             backend.get("documents/999/")
 
     @resp_lib.activate
     def test_get_500_raises(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"error": "server error"}, status=500)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"error": "server error"},
+            status=500,
+        )
         backend = make_backend()
         with pytest.raises(RuntimeError, match="500"):
             backend.get("documents/")
 
     @resp_lib.activate
     def test_post_json(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/tags/",
-                     json={"id": 5, "name": "test"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/tags/",
+            json={"id": 5, "name": "test"},
+            status=201,
+        )
         backend = make_backend()
         result = backend.post("tags/", data={"name": "test"})
         assert result["id"] == 5
 
     @resp_lib.activate
     def test_post_multipart(self, tmp_path):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/documents/post_document/",
-                     json={"task_id": "abc123"}, status=200)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/documents/post_document/",
+            json={"task_id": "abc123"},
+            status=200,
+        )
         backend = make_backend()
         pdf_file = tmp_path / "test.pdf"
         pdf_file.write_bytes(b"%PDF fake content")
@@ -257,32 +290,47 @@ class TestPaperlessBackend:
 
     @resp_lib.activate
     def test_patch(self):
-        resp_lib.add(resp_lib.PATCH, f"{BASE_URL}/api/documents/1/",
-                     json={"id": 1, "title": "Updated"}, status=200)
+        resp_lib.add(
+            resp_lib.PATCH,
+            f"{BASE_URL}/api/documents/1/",
+            json={"id": 1, "title": "Updated"},
+            status=200,
+        )
         backend = make_backend()
         result = backend.patch("documents/1/", data={"title": "Updated"})
         assert result["title"] == "Updated"
 
     @resp_lib.activate
     def test_put(self):
-        resp_lib.add(resp_lib.PUT, f"{BASE_URL}/api/documents/1/",
-                     json={"id": 1, "title": "Replaced"}, status=200)
+        resp_lib.add(
+            resp_lib.PUT,
+            f"{BASE_URL}/api/documents/1/",
+            json={"id": 1, "title": "Replaced"},
+            status=200,
+        )
         backend = make_backend()
         result = backend.put("documents/1/", data={"title": "Replaced"})
         assert result["title"] == "Replaced"
 
     @resp_lib.activate
     def test_delete(self):
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/documents/1/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/documents/1/", status=204)
         backend = make_backend()
         backend.delete("documents/1/")  # Must not raise
 
     @resp_lib.activate
     def test_paginate_single_page(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tags/",
-                     json={"count": 2, "next": None, "previous": None,
-                           "results": [{"id": 1}, {"id": 2}]}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/",
+            json={
+                "count": 2,
+                "next": None,
+                "previous": None,
+                "results": [{"id": 1}, {"id": 2}],
+            },
+            status=200,
+        )
         backend = make_backend()
         results = backend.paginate("tags/")
         assert len(results) == 2
@@ -290,12 +338,23 @@ class TestPaperlessBackend:
     @resp_lib.activate
     def test_paginate_multiple_pages(self):
         page2_url = f"{BASE_URL}/api/tags/?page=2&page_size=100"
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tags/",
-                     json={"count": 3, "next": page2_url, "previous": None,
-                           "results": [{"id": 1}, {"id": 2}]}, status=200)
-        resp_lib.add(resp_lib.GET, page2_url,
-                     json={"count": 3, "next": None, "previous": None,
-                           "results": [{"id": 3}]}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/",
+            json={
+                "count": 3,
+                "next": page2_url,
+                "previous": None,
+                "results": [{"id": 1}, {"id": 2}],
+            },
+            status=200,
+        )
+        resp_lib.add(
+            resp_lib.GET,
+            page2_url,
+            json={"count": 3, "next": None, "previous": None, "results": [{"id": 3}]},
+            status=200,
+        )
         backend = make_backend()
         results = backend.paginate("tags/")
         assert len(results) == 3
@@ -304,16 +363,19 @@ class TestPaperlessBackend:
     @resp_lib.activate
     def test_paginate_plain_list_response(self):
         """Some endpoints may return a plain JSON list (not paginated)."""
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tasks/",
-                     json=[{"id": 1}, {"id": 2}], status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tasks/",
+            json=[{"id": 1}, {"id": 2}],
+            status=200,
+        )
         backend = make_backend()
         results = backend.paginate("tasks/")
         assert results == [{"id": 1}, {"id": 2}]
 
     @resp_lib.activate
     def test_ping_success(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/",
-                     json={}, status=200)
+        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/", json={}, status=200)
         backend = make_backend()
         result = backend.ping()
         assert result["status"] == "ok"
@@ -322,32 +384,52 @@ class TestPaperlessBackend:
 
     def test_ping_connection_error(self):
         import requests
+
         backend = make_backend()
-        with patch.object(backend._session, "get",
-                          side_effect=requests.ConnectionError("refused")):
-            with pytest.raises(RuntimeError, match="Cannot connect"):
-                backend.ping()
+        with (
+            patch.object(
+                backend._session,
+                "get",
+                side_effect=requests.ConnectionError("refused"),
+            ),
+            pytest.raises(RuntimeError, match="Cannot connect"),
+        ):
+            backend.ping()
 
     def test_ping_timeout(self):
         import requests
+
         backend = make_backend()
-        with patch.object(backend._session, "get",
-                          side_effect=requests.Timeout("timed out")):
-            with pytest.raises(RuntimeError, match="timed out"):
-                backend.ping()
+        with (
+            patch.object(
+                backend._session,
+                "get",
+                side_effect=requests.Timeout("timed out"),
+            ),
+            pytest.raises(RuntimeError, match="timed out"),
+        ):
+            backend.ping()
 
     @resp_lib.activate
     def test_get_token_success(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/token/",
-                     json={"token": "mytoken456"}, status=200)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"token": "mytoken456"},
+            status=200,
+        )
         backend = make_backend()
         token = backend.get_token("admin", "password")
         assert token == "mytoken456"
 
     @resp_lib.activate
     def test_get_token_failure(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/token/",
-                     json={"non_field_errors": ["bad creds"]}, status=400)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"non_field_errors": ["bad creds"]},
+            status=400,
+        )
         backend = make_backend()
         with pytest.raises(RuntimeError, match="Failed to obtain token"):
             backend.get_token("admin", "wrongpass")
@@ -359,17 +441,24 @@ class TestPaperlessBackend:
 class TestDocuments:
     @resp_lib.activate
     def test_list_no_filter(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         backend = make_backend()
         result = list_documents(backend)
         assert result["count"] == 0
 
     @resp_lib.activate
     def test_list_with_query(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 1, "results": [{"id": 1, "title": "inv"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 1, "results": [{"id": 1, "title": "inv"}]},
+            status=200,
+        )
         backend = make_backend()
         result = list_documents(backend, query="invoice")
         assert result["count"] == 1
@@ -377,32 +466,48 @@ class TestDocuments:
 
     @resp_lib.activate
     def test_list_with_tag_filter(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         backend = make_backend()
         list_documents(backend, tag="urgent")
         assert "tags__name__icontains=urgent" in resp_lib.calls[0].request.url
 
     @resp_lib.activate
     def test_list_with_correspondent_filter(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         backend = make_backend()
         list_documents(backend, correspondent="ACME")
         assert "correspondent__name__icontains=ACME" in resp_lib.calls[0].request.url
 
     @resp_lib.activate
     def test_list_with_doc_type_filter(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         backend = make_backend()
         list_documents(backend, doc_type="Invoice")
         assert "document_type__name__icontains=Invoice" in resp_lib.calls[0].request.url
 
     @resp_lib.activate
     def test_list_page_size_respected(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         backend = make_backend()
         list_documents(backend, page_size=10, page=2)
         url = resp_lib.calls[0].request.url
@@ -411,8 +516,12 @@ class TestDocuments:
 
     @resp_lib.activate
     def test_get_document(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/42/",
-                     json={"id": 42, "title": "Test Doc"}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/42/",
+            json={"id": 42, "title": "Test Doc"},
+            status=200,
+        )
         backend = make_backend()
         result = get_document(backend, 42)
         assert result["id"] == 42
@@ -422,8 +531,12 @@ class TestDocuments:
     def test_upload_document(self, tmp_path):
         pdf_file = tmp_path / "test.pdf"
         pdf_file.write_bytes(b"%PDF-1.4 fake")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/documents/post_document/",
-                     json={"task_id": "uuid-123"}, status=200)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/documents/post_document/",
+            json={"task_id": "uuid-123"},
+            status=200,
+        )
         backend = make_backend()
         result = upload_document(backend, str(pdf_file), title="Test Upload")
         assert result["task_id"] == "uuid-123"
@@ -432,12 +545,20 @@ class TestDocuments:
     def test_upload_with_tags_and_metadata(self, tmp_path):
         pdf_file = tmp_path / "invoice.pdf"
         pdf_file.write_bytes(b"%PDF-1.4 fake")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/documents/post_document/",
-                     json={"task_id": "uuid-456"}, status=200)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/documents/post_document/",
+            json={"task_id": "uuid-456"},
+            status=200,
+        )
         backend = make_backend()
         result = upload_document(
-            backend, str(pdf_file), title="Invoice",
-            correspondent_id=3, document_type_id=5, tag_ids=[1, 2],
+            backend,
+            str(pdf_file),
+            title="Invoice",
+            correspondent_id=3,
+            document_type_id=5,
+            tag_ids=[1, 2],
         )
         assert result["task_id"] == "uuid-456"
 
@@ -449,7 +570,8 @@ class TestDocuments:
     @resp_lib.activate
     def test_download_document_with_content_disposition(self, tmp_path):
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/1/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/download/",
             body=b"%PDF-1.4 content",
             headers={"Content-Disposition": 'attachment; filename="doc_1.pdf"'},
             status=200,
@@ -463,7 +585,8 @@ class TestDocuments:
     @resp_lib.activate
     def test_download_document_fallback_filename(self, tmp_path):
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/99/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/99/download/",
             body=b"content",
             headers={},  # No Content-Disposition
             status=200,
@@ -475,7 +598,8 @@ class TestDocuments:
     @resp_lib.activate
     def test_download_original_passes_param(self, tmp_path):
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/1/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/download/",
             body=b"original content",
             headers={"Content-Disposition": 'attachment; filename="orig.pdf"'},
             status=200,
@@ -487,16 +611,24 @@ class TestDocuments:
 
     @resp_lib.activate
     def test_update_document_title(self):
-        resp_lib.add(resp_lib.PATCH, f"{BASE_URL}/api/documents/1/",
-                     json={"id": 1, "title": "New Title"}, status=200)
+        resp_lib.add(
+            resp_lib.PATCH,
+            f"{BASE_URL}/api/documents/1/",
+            json={"id": 1, "title": "New Title"},
+            status=200,
+        )
         backend = make_backend()
         result = update_document(backend, 1, title="New Title")
         assert result["title"] == "New Title"
 
     @resp_lib.activate
     def test_update_document_tags(self):
-        resp_lib.add(resp_lib.PATCH, f"{BASE_URL}/api/documents/1/",
-                     json={"id": 1, "tags": [2, 3]}, status=200)
+        resp_lib.add(
+            resp_lib.PATCH,
+            f"{BASE_URL}/api/documents/1/",
+            json={"id": 1, "tags": [2, 3]},
+            status=200,
+        )
         backend = make_backend()
         result = update_document(backend, 1, tag_ids=[2, 3])
         assert result["tags"] == [2, 3]
@@ -508,16 +640,18 @@ class TestDocuments:
 
     @resp_lib.activate
     def test_delete_document(self):
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/documents/1/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/documents/1/", status=204)
         backend = make_backend()
         delete_document(backend, 1)  # Must not raise
 
     @resp_lib.activate
     def test_search_documents(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 2, "results": [{"id": 1}, {"id": 2}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 2, "results": [{"id": 1}, {"id": 2}]},
+            status=200,
+        )
         backend = make_backend()
         result = search_documents(backend, "invoice 2024")
         assert result["count"] == 2
@@ -530,10 +664,16 @@ class TestDocuments:
 class TestTags:
     @resp_lib.activate
     def test_list_tags(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tags/",
-                     json={"count": 2, "next": None, "results":
-                           [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/",
+            json={
+                "count": 2,
+                "next": None,
+                "results": [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}],
+            },
+            status=200,
+        )
         backend = make_backend()
         result = list_tags(backend)
         assert len(result) == 2
@@ -541,28 +681,37 @@ class TestTags:
 
     @resp_lib.activate
     def test_create_tag_defaults(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/tags/",
-                     json={"id": 10, "name": "newtag", "color": "#a6cee3"},
-                     status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/tags/",
+            json={"id": 10, "name": "newtag", "color": "#a6cee3"},
+            status=201,
+        )
         backend = make_backend()
         result = create_tag(backend, "newtag")
         assert result["id"] == 10
 
     @resp_lib.activate
     def test_create_tag_custom_color(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/tags/",
-                     json={"id": 11, "name": "urgent", "color": "#ff0000"},
-                     status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/tags/",
+            json={"id": 11, "name": "urgent", "color": "#ff0000"},
+            status=201,
+        )
         backend = make_backend()
-        result = create_tag(backend, "urgent", color="#ff0000")
+        create_tag(backend, "urgent", color="#ff0000")
         body = json.loads(resp_lib.calls[0].request.body)
         assert body["color"] == "#ff0000"
 
     @resp_lib.activate
     def test_create_inbox_tag(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/tags/",
-                     json={"id": 12, "name": "inbox", "is_inbox_tag": True},
-                     status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/tags/",
+            json={"id": 12, "name": "inbox", "is_inbox_tag": True},
+            status=201,
+        )
         backend = make_backend()
         create_tag(backend, "inbox", is_inbox_tag=True)
         body = json.loads(resp_lib.calls[0].request.body)
@@ -576,8 +725,12 @@ class TestTags:
 
     @resp_lib.activate
     def test_get_tag(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tags/5/",
-                     json={"id": 5, "name": "mytag"}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/5/",
+            json={"id": 5, "name": "mytag"},
+            status=200,
+        )
         backend = make_backend()
         result = get_tag(backend, 5)
         assert result["id"] == 5
@@ -589,10 +742,12 @@ class TestTags:
 class TestCorrespondents:
     @resp_lib.activate
     def test_list_correspondents(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/correspondents/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "name": "ACME"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/correspondents/",
+            json={"count": 1, "next": None, "results": [{"id": 1, "name": "ACME"}]},
+            status=200,
+        )
         backend = make_backend()
         result = list_correspondents(backend)
         assert len(result) == 1
@@ -600,8 +755,12 @@ class TestCorrespondents:
 
     @resp_lib.activate
     def test_create_correspondent(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/correspondents/",
-                     json={"id": 5, "name": "New Corp"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/correspondents/",
+            json={"id": 5, "name": "New Corp"},
+            status=201,
+        )
         backend = make_backend()
         result = create_correspondent(backend, "New Corp")
         assert result["id"] == 5
@@ -610,8 +769,12 @@ class TestCorrespondents:
 
     @resp_lib.activate
     def test_create_correspondent_with_match(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/correspondents/",
-                     json={"id": 6, "name": "ACME"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/correspondents/",
+            json={"id": 6, "name": "ACME"},
+            status=201,
+        )
         backend = make_backend()
         create_correspondent(backend, "ACME", match="acme corp")
         body = json.loads(resp_lib.calls[0].request.body)
@@ -619,15 +782,18 @@ class TestCorrespondents:
 
     @resp_lib.activate
     def test_delete_correspondent(self):
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/correspondents/5/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/correspondents/5/", status=204)
         backend = make_backend()
         delete_correspondent(backend, 5)  # Must not raise
 
     @resp_lib.activate
     def test_get_correspondent(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/correspondents/5/",
-                     json={"id": 5, "name": "ACME"}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/correspondents/5/",
+            json={"id": 5, "name": "ACME"},
+            status=200,
+        )
         backend = make_backend()
         result = get_correspondent(backend, 5)
         assert result["id"] == 5
@@ -639,10 +805,12 @@ class TestCorrespondents:
 class TestDocTypes:
     @resp_lib.activate
     def test_list_doc_types(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/document_types/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "name": "Invoice"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/document_types/",
+            json={"count": 1, "next": None, "results": [{"id": 1, "name": "Invoice"}]},
+            status=200,
+        )
         backend = make_backend()
         result = list_doc_types(backend)
         assert len(result) == 1
@@ -650,23 +818,30 @@ class TestDocTypes:
 
     @resp_lib.activate
     def test_create_doc_type(self):
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/document_types/",
-                     json={"id": 3, "name": "Contract"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/document_types/",
+            json={"id": 3, "name": "Contract"},
+            status=201,
+        )
         backend = make_backend()
         result = create_doc_type(backend, "Contract")
         assert result["name"] == "Contract"
 
     @resp_lib.activate
     def test_delete_doc_type(self):
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/document_types/3/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/document_types/3/", status=204)
         backend = make_backend()
         delete_doc_type(backend, 3)  # Must not raise
 
     @resp_lib.activate
     def test_get_doc_type(self):
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/document_types/3/",
-                     json={"id": 3, "name": "Contract"}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/document_types/3/",
+            json={"id": 3, "name": "Contract"},
+            status=200,
+        )
         backend = make_backend()
         result = get_doc_type(backend, 3)
         assert result["id"] == 3
@@ -677,67 +852,83 @@ class TestDocTypes:
 
 class TestSession:
     def test_last_query_set_and_get(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={}):
-                sess = Session()
-                sess.last_query = "test query"
-                assert sess.last_query == "test query"
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch("paperless_ngx.core.session.load_session", return_value={}),
+        ):
+            sess = Session()
+            sess.last_query = "test query"
+            assert sess.last_query == "test query"
 
     def test_selected_docs_set_and_get(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={}):
-                sess = Session()
-                sess.selected_docs = [1, 2, 3]
-                assert sess.selected_docs == [1, 2, 3]
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch("paperless_ngx.core.session.load_session", return_value={}),
+        ):
+            sess = Session()
+            sess.selected_docs = [1, 2, 3]
+            assert sess.selected_docs == [1, 2, 3]
 
     def test_add_history_appends(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={}):
-                sess = Session()
-                sess.add_history("document list")
-                sess.add_history("tag list")
-                assert sess.history == ["document list", "tag list"]
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch("paperless_ngx.core.session.load_session", return_value={}),
+        ):
+            sess = Session()
+            sess.add_history("document list")
+            sess.add_history("tag list")
+            assert sess.history == ["document list", "tag list"]
 
     def test_history_capped_at_500(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={}):
-                sess = Session()
-                for i in range(600):
-                    sess.add_history(f"cmd {i}")
-                assert len(sess.history) == 500
-                # Last 500 are kept
-                assert sess.history[-1] == "cmd 599"
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch("paperless_ngx.core.session.load_session", return_value={}),
+        ):
+            sess = Session()
+            for i in range(600):
+                sess.add_history(f"cmd {i}")
+            assert len(sess.history) == 500
+            # Last 500 are kept
+            assert sess.history[-1] == "cmd 599"
 
     def test_clear_selection(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={"selected_docs": [1, 2]}):
-                sess = Session()
-                assert sess.selected_docs == [1, 2]
-                sess.clear_selection()
-                assert sess.selected_docs == []
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch(
+                "paperless_ngx.core.session.load_session",
+                return_value={"selected_docs": [1, 2]},
+            ),
+        ):
+            sess = Session()
+            assert sess.selected_docs == [1, 2]
+            sess.clear_selection()
+            assert sess.selected_docs == []
 
     def test_to_dict(self):
-        with patch("paperless_ngx.core.session.save_session"):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={"last_query": "foo", "selected_docs": [],
-                                     "history": []}):
-                sess = Session()
-                d = sess.to_dict()
-                assert d["last_query"] == "foo"
+        with (
+            patch("paperless_ngx.core.session.save_session"),
+            patch(
+                "paperless_ngx.core.session.load_session",
+                return_value={
+                    "last_query": "foo",
+                    "selected_docs": [],
+                    "history": [],
+                },
+            ),
+        ):
+            sess = Session()
+            d = sess.to_dict()
+            assert d["last_query"] == "foo"
 
     def test_persist_is_called_on_mutation(self):
         save_mock = MagicMock()
-        with patch("paperless_ngx.core.session.save_session", save_mock):
-            with patch("paperless_ngx.core.session.load_session",
-                       return_value={}):
-                sess = Session()
-                sess.last_query = "x"
-                assert save_mock.called
+        with (
+            patch("paperless_ngx.core.session.save_session", save_mock),
+            patch("paperless_ngx.core.session.load_session", return_value={}),
+        ):
+            sess = Session()
+            sess.last_query = "x"
+            assert save_mock.called
 
 
 # ── TestProjectCore ───────────────────────────────────────────────────────────
@@ -749,6 +940,7 @@ class TestProjectCore:
         # ping endpoint
         resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/", json={}, status=200)
         from paperless_ngx.core.project import init_connection
+
         config = init_connection(BASE_URL, token="mytoken")
         assert config.url == BASE_URL
         assert config.token == "mytoken"
@@ -759,16 +951,22 @@ class TestProjectCore:
     @resp_lib.activate
     def test_init_connection_with_credentials(self):
         # Token acquisition endpoint
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/token/",
-                     json={"token": "acquired_token"}, status=200)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"token": "acquired_token"},
+            status=200,
+        )
         # ping endpoint
         resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/", json={}, status=200)
         from paperless_ngx.core.project import init_connection
+
         config = init_connection(BASE_URL, username="admin", password="pass")
         assert config.token == "acquired_token"
 
     def test_init_connection_no_auth_raises(self):
         from paperless_ngx.core.project import init_connection
+
         with pytest.raises(ValueError, match="Provide either"):
             init_connection(BASE_URL)
 
@@ -776,9 +974,14 @@ class TestProjectCore:
     def test_get_connection_info(self):
         # Use a token long enough to trigger masking (>8 chars)
         save_config(BASE_URL, "longtesttoken123")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/statistics/",
-                     json={"documents_total": 42}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/statistics/",
+            json={"documents_total": 42},
+            status=200,
+        )
         from paperless_ngx.core.project import get_connection_info
+
         info = get_connection_info()
         assert info["url"] == BASE_URL
         # Token should be masked but show first 8 chars + "..."
@@ -791,12 +994,14 @@ class TestProjectCore:
         save_config(BASE_URL, "tok")
         resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/", json={}, status=200)
         from paperless_ngx.core.project import ping_server
+
         result = ping_server()
         assert result["status"] == "ok"
         assert result["elapsed_ms"] >= 0
 
     def test_ping_server_no_config_raises(self):
         from paperless_ngx.core.project import ping_server
+
         with pytest.raises(RuntimeError, match="project init"):
             ping_server()
 
@@ -809,12 +1014,16 @@ class TestExportCore:
     def test_bulk_download_all_ok(self, tmp_path):
         for doc_id in [1, 2, 3]:
             resp_lib.add(
-                resp_lib.GET, f"{BASE_URL}/api/documents/{doc_id}/download/",
+                resp_lib.GET,
+                f"{BASE_URL}/api/documents/{doc_id}/download/",
                 body=b"PDF content",
-                headers={"Content-Disposition": f'attachment; filename="doc_{doc_id}.pdf"'},
+                headers={
+                    "Content-Disposition": f'attachment; filename="doc_{doc_id}.pdf"'
+                },
                 status=200,
             )
         from paperless_ngx.core.export import bulk_download
+
         backend = make_backend()
         results = bulk_download(backend, [1, 2, 3], output_dir=str(tmp_path))
         assert len(results) == 3
@@ -824,16 +1033,20 @@ class TestExportCore:
     @resp_lib.activate
     def test_bulk_download_partial_failure(self, tmp_path):
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/1/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/download/",
             body=b"PDF content",
             headers={"Content-Disposition": 'attachment; filename="doc_1.pdf"'},
             status=200,
         )
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/2/download/",
-            json={"detail": "not found"}, status=404,
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/2/download/",
+            json={"detail": "not found"},
+            status=404,
         )
         from paperless_ngx.core.export import bulk_download
+
         backend = make_backend()
         results = bulk_download(backend, [1, 2], output_dir=str(tmp_path))
         assert results[0]["status"] == "ok"
@@ -843,19 +1056,23 @@ class TestExportCore:
     @resp_lib.activate
     def test_bulk_download_progress_callback(self, tmp_path):
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/1/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/download/",
             body=b"PDF",
             headers={"Content-Disposition": 'attachment; filename="d.pdf"'},
             status=200,
         )
         progress_calls = []
+
         def progress(current, total, doc_id):
             progress_calls.append((current, total, doc_id))
 
         from paperless_ngx.core.export import bulk_download
+
         backend = make_backend()
-        bulk_download(backend, [1], output_dir=str(tmp_path),
-                      progress_callback=progress)
+        bulk_download(
+            backend, [1], output_dir=str(tmp_path), progress_callback=progress
+        )
         assert len(progress_calls) >= 2  # at least one mid-progress + final
 
 
@@ -916,16 +1133,23 @@ class TestCLILayer:
         runner = self._runner()
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        for group in ("document", "tag", "correspondent", "doctype",
-                      "project", "export", "status", "repl"):
+        for group in (
+            "document",
+            "tag",
+            "correspondent",
+            "doctype",
+            "project",
+            "export",
+            "status",
+            "repl",
+        ):
             assert group in result.output
 
     def test_document_help(self):
         runner = self._runner()
         result = runner.invoke(main, ["document", "--help"])
         assert result.exit_code == 0
-        for cmd in ("list", "get", "upload", "download",
-                    "update", "delete", "search"):
+        for cmd in ("list", "get", "upload", "download", "update", "delete", "search"):
             assert cmd in result.output
 
     def test_tag_help(self):
@@ -957,7 +1181,9 @@ class TestCLILayer:
         runner = self._runner()
         result = runner.invoke(main, ["document", "list"])
         assert result.exit_code != 0
-        assert "project init" in result.output or "project init" in (result.stderr or "")
+        assert "project init" in result.output or "project init" in (
+            result.stderr or ""
+        )
 
     def test_document_list_no_config_json_flag(self):
         runner = self._runner()
@@ -969,11 +1195,16 @@ class TestCLILayer:
     @resp_lib.activate
     def test_document_list_json_output(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "title": "My Doc",
-                                        "created": "2024-01-01"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={
+                "count": 1,
+                "next": None,
+                "results": [{"id": 1, "title": "My Doc", "created": "2024-01-01"}],
+            },
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["document", "list", "--json"])
         assert result.exit_code == 0, result.output
@@ -984,8 +1215,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_document_list_with_query(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["document", "list", "--query", "invoice"])
         assert result.exit_code == 0
@@ -994,8 +1229,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_document_get_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/42/",
-                     json={"id": 42, "title": "Test"}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/42/",
+            json={"id": 42, "title": "Test"},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["document", "get", "42", "--json"])
         assert result.exit_code == 0
@@ -1005,8 +1244,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_document_search_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 1, "results": [{"id": 7}]}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 1, "results": [{"id": 7}]},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["document", "search", "test query", "--json"])
         assert result.exit_code == 0
@@ -1027,8 +1270,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_document_update_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.PATCH, f"{BASE_URL}/api/documents/3/",
-                     json={"id": 3, "title": "New"}, status=200)
+        resp_lib.add(
+            resp_lib.PATCH,
+            f"{BASE_URL}/api/documents/3/",
+            json={"id": 3, "title": "New"},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(
             main, ["document", "update", "3", "--title", "New", "--json"]
@@ -1042,12 +1289,14 @@ class TestCLILayer:
         save_config(BASE_URL, "tok")
         pdf_file = tmp_path / "doc.pdf"
         pdf_file.write_bytes(b"%PDF fake")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/documents/post_document/",
-                     json={"task_id": "t-1"}, status=200)
-        runner = self._runner()
-        result = runner.invoke(
-            main, ["document", "upload", str(pdf_file), "--json"]
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/documents/post_document/",
+            json={"task_id": "t-1"},
+            status=200,
         )
+        runner = self._runner()
+        result = runner.invoke(main, ["document", "upload", str(pdf_file), "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["task_id"] == "t-1"
@@ -1056,15 +1305,15 @@ class TestCLILayer:
     def test_document_download_json(self, tmp_path):
         save_config(BASE_URL, "tok")
         resp_lib.add(
-            resp_lib.GET, f"{BASE_URL}/api/documents/1/download/",
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/1/download/",
             body=b"%PDF",
             headers={"Content-Disposition": 'attachment; filename="d.pdf"'},
             status=200,
         )
         runner = self._runner()
         result = runner.invoke(
-            main, ["document", "download", "1",
-                   "--output-dir", str(tmp_path), "--json"]
+            main, ["document", "download", "1", "--output-dir", str(tmp_path), "--json"]
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -1076,10 +1325,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_tag_list_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/tags/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "name": "urgent"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/",
+            json={"count": 1, "next": None, "results": [{"id": 1, "name": "urgent"}]},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["tag", "list", "--json"])
         assert result.exit_code == 0
@@ -1090,8 +1341,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_tag_create_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/tags/",
-                     json={"id": 7, "name": "new-tag"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/tags/",
+            json={"id": 7, "name": "new-tag"},
+            status=201,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["tag", "create", "new-tag", "--json"])
         assert result.exit_code == 0
@@ -1113,10 +1368,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_correspondent_list_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/correspondents/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "name": "ACME"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/correspondents/",
+            json={"count": 1, "next": None, "results": [{"id": 1, "name": "ACME"}]},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["correspondent", "list", "--json"])
         assert result.exit_code == 0
@@ -1126,12 +1383,14 @@ class TestCLILayer:
     @resp_lib.activate
     def test_correspondent_create_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/correspondents/",
-                     json={"id": 9, "name": "Corp X"}, status=201)
-        runner = self._runner()
-        result = runner.invoke(
-            main, ["correspondent", "create", "Corp X", "--json"]
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/correspondents/",
+            json={"id": 9, "name": "Corp X"},
+            status=201,
         )
+        runner = self._runner()
+        result = runner.invoke(main, ["correspondent", "create", "Corp X", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["id"] == 9
@@ -1139,8 +1398,7 @@ class TestCLILayer:
     @resp_lib.activate
     def test_correspondent_delete_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/correspondents/9/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/correspondents/9/", status=204)
         runner = self._runner()
         result = runner.invoke(
             main, ["correspondent", "delete", "9", "--yes", "--json"]
@@ -1154,10 +1412,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_doctype_list_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/document_types/",
-                     json={"count": 1, "next": None,
-                           "results": [{"id": 1, "name": "Invoice"}]},
-                     status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/document_types/",
+            json={"count": 1, "next": None, "results": [{"id": 1, "name": "Invoice"}]},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["doctype", "list", "--json"])
         assert result.exit_code == 0
@@ -1167,8 +1427,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_doctype_create_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.POST, f"{BASE_URL}/api/document_types/",
-                     json={"id": 4, "name": "Receipt"}, status=201)
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/document_types/",
+            json={"id": 4, "name": "Receipt"},
+            status=201,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["doctype", "create", "Receipt", "--json"])
         assert result.exit_code == 0
@@ -1178,12 +1442,9 @@ class TestCLILayer:
     @resp_lib.activate
     def test_doctype_delete_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/document_types/4/",
-                     status=204)
+        resp_lib.add(resp_lib.DELETE, f"{BASE_URL}/api/document_types/4/", status=204)
         runner = self._runner()
-        result = runner.invoke(
-            main, ["doctype", "delete", "4", "--yes", "--json"]
-        )
+        result = runner.invoke(main, ["doctype", "delete", "4", "--yes", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "deleted"
@@ -1203,8 +1464,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_project_info_json(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/statistics/",
-                     json={"documents_total": 10}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/statistics/",
+            json={"documents_total": 10},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["project", "info", "--json"])
         assert result.exit_code == 0
@@ -1232,8 +1497,17 @@ class TestCLILayer:
             mock_zip.return_value = str(tmp_path / "paperless-export.zip")
             result = runner.invoke(
                 main,
-                ["export", "bulk", "1", "2",
-                 "--output-dir", str(tmp_path), "--zip", "--original", "--json"],
+                [
+                    "export",
+                    "bulk",
+                    "1",
+                    "2",
+                    "--output-dir",
+                    str(tmp_path),
+                    "--zip",
+                    "--original",
+                    "--json",
+                ],
             )
 
         assert result.exit_code == 0
@@ -1251,7 +1525,8 @@ class TestCLILayer:
         save_config(BASE_URL, "tok")
         for doc_id in [1, 2]:
             resp_lib.add(
-                resp_lib.GET, f"{BASE_URL}/api/documents/{doc_id}/download/",
+                resp_lib.GET,
+                f"{BASE_URL}/api/documents/{doc_id}/download/",
                 body=b"PDF",
                 headers={
                     "Content-Disposition": f'attachment; filename="d{doc_id}.pdf"'
@@ -1261,8 +1536,7 @@ class TestCLILayer:
         runner = self._runner()
         result = runner.invoke(
             main,
-            ["export", "bulk", "1", "2",
-             "--output-dir", str(tmp_path), "--json"],
+            ["export", "bulk", "1", "2", "--output-dir", str(tmp_path), "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -1274,8 +1548,12 @@ class TestCLILayer:
     @resp_lib.activate
     def test_global_json_flag_with_document_list(self):
         save_config(BASE_URL, "tok")
-        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/documents/",
-                     json={"count": 0, "results": []}, status=200)
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
         runner = self._runner()
         result = runner.invoke(main, ["--json", "document", "list"])
         assert result.exit_code == 0

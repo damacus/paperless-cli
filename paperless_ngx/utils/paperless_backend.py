@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Generator, Iterator
-from urllib.parse import urljoin, urlparse
+from typing import Any, cast
 
 import requests
 from requests import Response, Session
 
 CONFIG_PATH = os.path.expanduser("~/.config/paperless-cli/config.json")
 SESSION_PATH = "/tmp/paperless-cli-session.json"
+SessionState = dict[str, Any]
 
 
 class PaperlessConfig:
@@ -35,7 +35,7 @@ class PaperlessConfig:
         return {"url": self.url, "token": self.token}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PaperlessConfig":
+    def from_dict(cls, data: dict[str, str]) -> PaperlessConfig:
         return cls(url=data["url"], token=data["token"])
 
 
@@ -88,8 +88,7 @@ def _check_response(response: Response) -> Response:
     """Raise a descriptive RuntimeError for HTTP errors."""
     if response.status_code == 401:
         raise RuntimeError(
-            "Authentication failed. Check your API token.\n"
-            "Run: paperless project init"
+            "Authentication failed. Check your API token.\nRun: paperless project init"
         )
     if response.status_code == 403:
         raise RuntimeError("Permission denied for this operation.")
@@ -100,9 +99,7 @@ def _check_response(response: Response) -> Response:
             detail = response.json()
         except Exception:
             detail = response.text
-        raise RuntimeError(
-            f"API error {response.status_code}: {detail}"
-        )
+        raise RuntimeError(f"API error {response.status_code}: {detail}")
     return response
 
 
@@ -126,23 +123,24 @@ class PaperlessBackend:
         """GET and return the raw Response (for binary downloads)."""
         url = self.config.api_url(path)
         # Remove Content-Type header for binary requests
-        headers = {k: v for k, v in self._session.headers.items()
-                   if k != "Content-Type"}
-        resp = self._session.get(url, params=params, headers=headers,
-                                  stream=True)
+        headers = {
+            k: v for k, v in self._session.headers.items() if k != "Content-Type"
+        }
+        resp = self._session.get(url, params=params, headers=headers, stream=True)
         _check_response(resp)
         return resp
 
-    def post(self, path: str, data: dict | None = None,
-             files: dict | None = None) -> Any:
+    def post(
+        self, path: str, data: dict | None = None, files: dict | None = None
+    ) -> Any:
         """POST to a resource. Returns parsed JSON."""
         url = self.config.api_url(path)
         if files:
             # Multipart form upload — strip Content-Type to let requests set boundary
-            headers = {k: v for k, v in self._session.headers.items()
-                       if k != "Content-Type"}
-            resp = self._session.post(url, data=data, files=files,
-                                       headers=headers)
+            headers = {
+                k: v for k, v in self._session.headers.items() if k != "Content-Type"
+            }
+            resp = self._session.post(url, data=data, files=files, headers=headers)
         else:
             resp = self._session.post(url, json=data)
         _check_response(resp)
@@ -203,16 +201,17 @@ class PaperlessBackend:
                 timeout=10,
             )
             _check_response(resp)
-            return {"status": "ok", "url": self.config.url,
-                    "response_code": resp.status_code}
+            return {
+                "status": "ok",
+                "url": self.config.url,
+                "response_code": resp.status_code,
+            }
         except requests.ConnectionError as exc:
             raise RuntimeError(
                 f"Cannot connect to Paperless-ngx at {self.config.url}: {exc}"
             ) from exc
-        except requests.Timeout:
-            raise RuntimeError(
-                f"Connection to {self.config.url} timed out."
-            )
+        except requests.Timeout as exc:
+            raise RuntimeError(f"Connection to {self.config.url} timed out.") from exc
 
     def get_token(self, username: str, password: str) -> str:
         """Obtain an API token using username/password credentials.
@@ -226,19 +225,20 @@ class PaperlessBackend:
             timeout=10,
         )
         if resp.status_code == 200:
-            return resp.json()["token"]
+            body = cast(dict[str, str], resp.json())
+            return body["token"]
         raise RuntimeError(
             f"Failed to obtain token (HTTP {resp.status_code}). "
             "Check your username and password."
         )
 
 
-def load_session() -> dict:
+def load_session() -> SessionState:
     """Load ephemeral session state from /tmp."""
     path = Path(SESSION_PATH)
     if path.exists():
         try:
-            return json.loads(path.read_text())
+            return cast(SessionState, json.loads(path.read_text()))
         except Exception:
             pass
     return {
@@ -248,6 +248,6 @@ def load_session() -> dict:
     }
 
 
-def save_session(state: dict) -> None:
+def save_session(state: SessionState) -> None:
     """Persist ephemeral session state to /tmp."""
     Path(SESSION_PATH).write_text(json.dumps(state, indent=2))

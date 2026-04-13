@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from paperless_ngx.utils.paperless_backend import (
     CONFIG_PATH,
     PaperlessBackend,
@@ -14,9 +11,12 @@ from paperless_ngx.utils.paperless_backend import (
 )
 
 
-def init_connection(url: str, token: str | None = None,
-                    username: str | None = None,
-                    password: str | None = None) -> PaperlessConfig:
+def init_connection(
+    url: str,
+    token: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> PaperlessConfig:
     """Initialize the connection to a Paperless-ngx server.
 
     Accepts either a token or username+password (to obtain a token).
@@ -85,6 +85,7 @@ def ping_server() -> dict:
         Dict with status and response time.
     """
     import time
+
     config = find_paperless_server()
     backend = PaperlessBackend(config=config)
     start = time.monotonic()

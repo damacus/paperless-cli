@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from paperless_ngx.utils.paperless_backend import PaperlessBackend
 
 
@@ -22,7 +24,7 @@ def create_doc_type(
     name: str,
     match: str = "",
     matching_algorithm: int = 0,
-) -> dict:
+) -> dict[str, Any]:
     """Create a new document type.
 
     Args:
@@ -34,11 +36,17 @@ def create_doc_type(
     Returns:
         Created document type dict.
     """
-    return backend.post("document_types/", data={
-        "name": name,
-        "match": match,
-        "matching_algorithm": matching_algorithm,
-    })
+    return cast(
+        dict[str, Any],
+        backend.post(
+            "document_types/",
+            data={
+                "name": name,
+                "match": match,
+                "matching_algorithm": matching_algorithm,
+            },
+        ),
+    )
 
 
 def delete_doc_type(backend: PaperlessBackend, doc_type_id: int) -> None:
@@ -51,7 +59,7 @@ def delete_doc_type(backend: PaperlessBackend, doc_type_id: int) -> None:
     backend.delete(f"document_types/{doc_type_id}/")
 
 
-def get_doc_type(backend: PaperlessBackend, doc_type_id: int) -> dict:
+def get_doc_type(backend: PaperlessBackend, doc_type_id: int) -> dict[str, Any]:
     """Get a single document type by ID.
 
     Args:
@@ -61,4 +69,4 @@ def get_doc_type(backend: PaperlessBackend, doc_type_id: int) -> dict:
     Returns:
         Document type dict.
     """
-    return backend.get(f"document_types/{doc_type_id}/")
+    return cast(dict[str, Any], backend.get(f"document_types/{doc_type_id}/"))

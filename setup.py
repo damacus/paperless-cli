@@ -1,6 +1,6 @@
 """PyPI setup for paperless-ngx-cli."""
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", encoding="utf-8") as f:
     long_description = f.read()
@@ -28,8 +28,10 @@ setup(
             "pylint>=3.3.0",
             "bandit>=1.8.0",
             "build>=1.2.0",
+            "setuptools>=68",
             "twine>=6.1.0",
             "types-requests>=2.32.0",
+            "wheel",
         ]
     },
     entry_points={

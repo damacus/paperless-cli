@@ -8,6 +8,8 @@ Maintains ephemeral state across commands in a REPL session:
 
 from __future__ import annotations
 
+from typing import cast
+
 from paperless_ngx.utils.paperless_backend import load_session, save_session
 
 
@@ -19,7 +21,7 @@ class Session:
 
     @property
     def last_query(self) -> str:
-        return self._state.get("last_query", "")
+        return cast(str, self._state.get("last_query", ""))
 
     @last_query.setter
     def last_query(self, value: str):
@@ -28,7 +30,7 @@ class Session:
 
     @property
     def selected_docs(self) -> list[int]:
-        return self._state.get("selected_docs", [])
+        return cast(list[int], self._state.get("selected_docs", []))
 
     @selected_docs.setter
     def selected_docs(self, value: list[int]):
@@ -37,7 +39,7 @@ class Session:
 
     @property
     def history(self) -> list[str]:
-        return self._state.get("history", [])
+        return cast(list[str], self._state.get("history", []))
 
     def add_history(self, command: str):
         """Append a command to session history (max 500 entries)."""

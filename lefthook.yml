@@ -1,0 +1,23 @@
+pre-commit:
+  commands:
+    ruff-lint:
+      run: ./.venv/bin/ruff check .
+    ruff-format:
+      run: ./.venv/bin/ruff format --check .
+    mypy:
+      run: ./.venv/bin/mypy paperless_ngx --config-file pyproject.toml
+    pylint:
+      run: ./.venv/bin/pylint paperless_ngx
+    bandit:
+      run: ./.venv/bin/bandit -c pyproject.toml -r paperless_ngx -x paperless_ngx/tests
+
+pre-push:
+  commands:
+    tests:
+      run: ./.venv/bin/python -m pytest -q
+    compileall:
+      run: ./.venv/bin/python -m compileall paperless_ngx
+    build:
+      run: ./.venv/bin/python -m build --no-isolation
+    twine:
+      run: ./.venv/bin/twine check dist/*

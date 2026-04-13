@@ -9,21 +9,18 @@ Entry point: paperless
 from __future__ import annotations
 
 import json
-import os
 import shlex
-import sys
 from typing import Any
 
 import click
 
 from paperless_ngx import __version__
+from paperless_ngx.core.session import get_session
 from paperless_ngx.utils.paperless_backend import (
     PaperlessBackend,
     find_paperless_server,
 )
 from paperless_ngx.utils.repl_skin import ReplSkin
-from paperless_ngx.core.session import get_session
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,8 +79,9 @@ def _get_backend() -> PaperlessBackend:
 
 @click.group(invoke_without_command=True)
 @click.version_option(__version__, prog_name="paperless")
-@click.option("--json", "as_json", is_flag=True, default=False,
-              help="Output results as JSON.")
+@click.option(
+    "--json", "as_json", is_flag=True, default=False, help="Output results as JSON."
+)
 @click.pass_context
 def main(ctx: click.Context, as_json: bool):
     """paperless — Paperless-ngx document management CLI.
@@ -108,26 +106,35 @@ def project():
 
 
 @project.command("init")
-@click.option("--url", required=True, prompt="Paperless-ngx URL",
-              help="Base URL of the server (e.g. http://localhost:8000)")
-@click.option("--token", default=None,
-              help="API authentication token.")
-@click.option("--username", default=None,
-              help="Username (alternative to --token).")
-@click.option("--password", default=None, hide_input=True,
-              help="Password (alternative to --token).")
+@click.option(
+    "--url",
+    required=True,
+    prompt="Paperless-ngx URL",
+    help="Base URL of the server (e.g. http://localhost:8000)",
+)
+@click.option("--token", default=None, help="API authentication token.")
+@click.option("--username", default=None, help="Username (alternative to --token).")
+@click.option(
+    "--password",
+    default=None,
+    hide_input=True,
+    help="Password (alternative to --token).",
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def project_init(ctx, url, token, username, password, as_json):
     """Initialize the connection to a Paperless-ngx server."""
     from paperless_ngx.core.project import init_connection
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     try:
-        config = init_connection(url, token=token, username=username,
-                                 password=password)
-        result = {"status": "ok", "url": config.url,
-                  "message": "Connection configured and verified."}
+        config = init_connection(url, token=token, username=username, password=password)
+        result = {
+            "status": "ok",
+            "url": config.url,
+            "message": "Connection configured and verified.",
+        }
         _output(result, as_json, skin)
     except (ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -139,6 +146,7 @@ def project_init(ctx, url, token, username, password, as_json):
 def project_info(ctx, as_json):
     """Show current connection info and server statistics."""
     from paperless_ngx.core.project import get_connection_info
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     try:
@@ -154,6 +162,7 @@ def project_info(ctx, as_json):
 def project_ping(ctx, as_json):
     """Test the connection to the configured Paperless-ngx server."""
     from paperless_ngx.core.project import ping_server
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     try:
@@ -176,25 +185,32 @@ def document():
 @document.command("list")
 @click.option("--query", "-q", default=None, help="Full-text search query.")
 @click.option("--tag", "-t", default=None, help="Filter by tag name.")
-@click.option("--correspondent", "-c", default=None,
-              help="Filter by correspondent name.")
-@click.option("--type", "doc_type", default=None,
-              help="Filter by document type name.")
-@click.option("--page-size", default=25, show_default=True,
-              help="Number of results per page.")
+@click.option(
+    "--correspondent", "-c", default=None, help="Filter by correspondent name."
+)
+@click.option("--type", "doc_type", default=None, help="Filter by document type name.")
+@click.option(
+    "--page-size", default=25, show_default=True, help="Number of results per page."
+)
 @click.option("--page", default=1, show_default=True, help="Page number.")
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
-def document_list(ctx, query, tag, correspondent, doc_type, page_size,
-                  page, as_json):
+def document_list(ctx, query, tag, correspondent, doc_type, page_size, page, as_json):
     """List documents with optional filters."""
     from paperless_ngx.core.documents import list_documents
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
-    result = list_documents(backend, query=query, tag=tag,
-                             correspondent=correspondent, doc_type=doc_type,
-                             page_size=page_size, page=page)
+    result = list_documents(
+        backend,
+        query=query,
+        tag=tag,
+        correspondent=correspondent,
+        doc_type=doc_type,
+        page_size=page_size,
+        page=page,
+    )
     # Save last query for REPL context
     if query:
         sess = get_session()
@@ -209,6 +225,7 @@ def document_list(ctx, query, tag, correspondent, doc_type, page_size,
 def document_get(ctx, doc_id, as_json):
     """Get details for a specific document by ID."""
     from paperless_ngx.core.documents import get_document
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -221,19 +238,28 @@ def document_get(ctx, doc_id, as_json):
 @click.option("--title", default=None, help="Document title.")
 @click.option("--correspondent-id", type=int, default=None)
 @click.option("--type-id", "document_type_id", type=int, default=None)
-@click.option("--tag-id", "tag_ids", type=int, multiple=True,
-              help="Tag ID(s) to assign (repeatable).")
+@click.option(
+    "--tag-id",
+    "tag_ids",
+    type=int,
+    multiple=True,
+    help="Tag ID(s) to assign (repeatable).",
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
-def document_upload(ctx, file_path, title, correspondent_id,
-                    document_type_id, tag_ids, as_json):
+def document_upload(
+    ctx, file_path, title, correspondent_id, document_type_id, tag_ids, as_json
+):
     """Upload a document file to Paperless-ngx."""
     from paperless_ngx.core.documents import upload_document
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
     result = upload_document(
-        backend, file_path, title=title,
+        backend,
+        file_path,
+        title=title,
         correspondent_id=correspondent_id,
         document_type_id=document_type_id,
         tag_ids=list(tag_ids) if tag_ids else None,
@@ -245,20 +271,29 @@ def document_upload(ctx, file_path, title, correspondent_id,
 
 @document.command("download")
 @click.argument("doc_id", type=int)
-@click.option("--output-dir", "-o", default=".", show_default=True,
-              help="Directory to save the file.")
-@click.option("--original", is_flag=True, default=False,
-              help="Download the original file (not the archived version).")
+@click.option(
+    "--output-dir",
+    "-o",
+    default=".",
+    show_default=True,
+    help="Directory to save the file.",
+)
+@click.option(
+    "--original",
+    is_flag=True,
+    default=False,
+    help="Download the original file (not the archived version).",
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def document_download(ctx, doc_id, output_dir, original, as_json):
     """Download a document file to a local directory."""
     from paperless_ngx.core.documents import download_document
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
-    path = download_document(backend, doc_id, output_dir=output_dir,
-                              original=original)
+    path = download_document(backend, doc_id, output_dir=output_dir, original=original)
     result = {"doc_id": doc_id, "path": path, "status": "ok"}
     if not as_json:
         skin.success(f"Downloaded to: {path}")
@@ -270,20 +305,29 @@ def document_download(ctx, doc_id, output_dir, original, as_json):
 @click.option("--title", default=None)
 @click.option("--correspondent-id", type=int, default=None)
 @click.option("--type-id", "document_type_id", type=int, default=None)
-@click.option("--tag-id", "tag_ids", type=int, multiple=True,
-              help="Tag IDs (replaces all existing tags).")
+@click.option(
+    "--tag-id",
+    "tag_ids",
+    type=int,
+    multiple=True,
+    help="Tag IDs (replaces all existing tags).",
+)
 @click.option("--created", default=None, help="Created date (YYYY-MM-DD).")
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
-def document_update(ctx, doc_id, title, correspondent_id, document_type_id,
-                    tag_ids, created, as_json):
+def document_update(
+    ctx, doc_id, title, correspondent_id, document_type_id, tag_ids, created, as_json
+):
     """Update document metadata."""
     from paperless_ngx.core.documents import update_document
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
     result = update_document(
-        backend, doc_id, title=title,
+        backend,
+        doc_id,
+        title=title,
         correspondent_id=correspondent_id,
         document_type_id=document_type_id,
         tag_ids=list(tag_ids) if tag_ids else None,
@@ -296,13 +340,15 @@ def document_update(ctx, doc_id, title, correspondent_id, document_type_id,
 
 @document.command("delete")
 @click.argument("doc_id", type=int)
-@click.option("--yes", "-y", is_flag=True, default=False,
-              help="Skip confirmation prompt.")
+@click.option(
+    "--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt."
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def document_delete(ctx, doc_id, yes, as_json):
     """Delete a document by ID."""
     from paperless_ngx.core.documents import delete_document
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     if not yes:
@@ -323,6 +369,7 @@ def document_delete(ctx, doc_id, yes, as_json):
 def document_search(ctx, query, page_size, as_json):
     """Full-text search documents."""
     from paperless_ngx.core.documents import search_documents
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -346,6 +393,7 @@ def tag():
 def tag_list(ctx, as_json):
     """List all tags."""
     from paperless_ngx.core.tags import list_tags
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -356,13 +404,13 @@ def tag_list(ctx, as_json):
 @tag.command("create")
 @click.argument("name")
 @click.option("--color", default="#a6cee3", show_default=True)
-@click.option("--inbox", is_flag=True, default=False,
-              help="Mark as inbox tag.")
+@click.option("--inbox", is_flag=True, default=False, help="Mark as inbox tag.")
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def tag_create(ctx, name, color, inbox, as_json):
     """Create a new tag."""
     from paperless_ngx.core.tags import create_tag
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -380,6 +428,7 @@ def tag_create(ctx, name, color, inbox, as_json):
 def tag_delete(ctx, tag_id, yes, as_json):
     """Delete a tag by ID."""
     from paperless_ngx.core.tags import delete_tag
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     if not yes:
@@ -406,6 +455,7 @@ def correspondent():
 def correspondent_list(ctx, as_json):
     """List all correspondents."""
     from paperless_ngx.core.correspondents import list_correspondents
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -421,6 +471,7 @@ def correspondent_list(ctx, as_json):
 def correspondent_create(ctx, name, match, as_json):
     """Create a new correspondent."""
     from paperless_ngx.core.correspondents import create_correspondent
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -438,6 +489,7 @@ def correspondent_create(ctx, name, match, as_json):
 def correspondent_delete(ctx, correspondent_id, yes, as_json):
     """Delete a correspondent by ID."""
     from paperless_ngx.core.correspondents import delete_correspondent
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     if not yes:
@@ -464,6 +516,7 @@ def doctype():
 def doctype_list(ctx, as_json):
     """List all document types."""
     from paperless_ngx.core.doc_types import list_doc_types
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -479,6 +532,7 @@ def doctype_list(ctx, as_json):
 def doctype_create(ctx, name, match, as_json):
     """Create a new document type."""
     from paperless_ngx.core.doc_types import create_doc_type
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
@@ -496,6 +550,7 @@ def doctype_create(ctx, name, match, as_json):
 def doctype_delete(ctx, doc_type_id, yes, as_json):
     """Delete a document type by ID."""
     from paperless_ngx.core.doc_types import delete_doc_type
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     if not yes:
@@ -518,24 +573,34 @@ def export():
 
 @export.command("bulk")
 @click.argument("ids", nargs=-1, type=int, required=True)
-@click.option("--output-dir", "-o", default="./paperless-export",
-              show_default=True, help="Directory to save files.")
+@click.option(
+    "--output-dir",
+    "-o",
+    default="./paperless-export",
+    show_default=True,
+    help="Directory to save files.",
+)
 @click.option("--original", is_flag=True, default=False)
-@click.option("--zip", "as_zip", is_flag=True, default=False,
-              help="Download as a single ZIP file.")
+@click.option(
+    "--zip",
+    "as_zip",
+    is_flag=True,
+    default=False,
+    help="Download as a single ZIP file.",
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def export_bulk(ctx, ids, output_dir, original, as_zip, as_json):
     """Bulk download documents to a directory."""
-    from paperless_ngx.core.export import (
-        bulk_download, bulk_download_zip
-    )
+    from paperless_ngx.core.export import bulk_download, bulk_download_zip
+
     as_json = as_json or ctx.obj.get("as_json", False)
     skin = ctx.obj["skin"]
     backend = _get_backend()
 
     if as_zip:
         import os
+
         zip_path = os.path.join(output_dir, "paperless-export.zip")
         content = "originals" if original else "both"
         path = bulk_download_zip(backend, list(ids), zip_path, content=content)
@@ -543,20 +608,25 @@ def export_bulk(ctx, ids, output_dir, original, as_zip, as_json):
         if not as_json:
             skin.success(f"Downloaded {len(ids)} documents to: {path}")
     else:
+
         def progress(current, total, doc_id):
             if not as_json and total > 0:
-                skin.progress(current, total,
-                              f"doc {doc_id}" if doc_id else "done")
+                skin.progress(current, total, f"doc {doc_id}" if doc_id else "done")
 
-        results = bulk_download(backend, list(ids), output_dir=output_dir,
-                                 original=original,
-                                 progress_callback=progress)
+        results = bulk_download(
+            backend,
+            list(ids),
+            output_dir=output_dir,
+            original=original,
+            progress_callback=progress,
+        )
         ok = [r for r in results if r["status"] == "ok"]
         errors = [r for r in results if r["status"] == "error"]
-        result = {"downloaded": len(ok), "errors": len(errors),
-                  "results": results}
+        result = {"downloaded": len(ok), "errors": len(errors), "results": results}
         if not as_json:
-            skin.success(f"Downloaded {len(ok)} of {len(ids)} documents to: {output_dir}")
+            skin.success(
+                f"Downloaded {len(ok)} of {len(ids)} documents to: {output_dir}"
+            )
             if errors:
                 skin.warning(f"{len(errors)} document(s) failed.")
     _output(result, as_json, skin)
@@ -608,25 +678,25 @@ def repl_cmd(ctx):
 # ── REPL engine ───────────────────────────────────────────────────────────────
 
 _REPL_HELP = {
-    "document list [opts]":   "List documents",
-    "document get <id>":      "Get document details",
+    "document list [opts]": "List documents",
+    "document get <id>": "Get document details",
     "document upload <file>": "Upload a file",
     "document download <id>": "Download a document",
-    "document search <q>":    "Search documents",
-    "document update <id>":   "Update document metadata",
-    "document delete <id>":   "Delete a document",
-    "tag list":               "List tags",
-    "tag create <name>":      "Create a tag",
-    "tag delete <id>":        "Delete a tag",
-    "correspondent list":     "List correspondents",
-    "correspondent create":   "Create a correspondent",
-    "doctype list":           "List document types",
-    "export bulk <ids>":      "Bulk download documents",
-    "project info":           "Show connection info",
-    "project ping":           "Test connection",
-    "status":                 "Show session status",
-    "help":                   "Show this help",
-    "quit / exit":            "Exit the REPL",
+    "document search <q>": "Search documents",
+    "document update <id>": "Update document metadata",
+    "document delete <id>": "Delete a document",
+    "tag list": "List tags",
+    "tag create <name>": "Create a tag",
+    "tag delete <id>": "Delete a tag",
+    "correspondent list": "List correspondents",
+    "correspondent create": "Create a correspondent",
+    "doctype list": "List document types",
+    "export bulk <ids>": "Bulk download documents",
+    "project info": "Show connection info",
+    "project ping": "Test connection",
+    "status": "Show session status",
+    "help": "Show this help",
+    "quit / exit": "Exit the REPL",
 }
 
 
@@ -644,6 +714,7 @@ def _run_repl(skin: ReplSkin):
             try:
                 config = find_paperless_server()
                 from urllib.parse import urlparse
+
                 host = urlparse(config.url).netloc
                 ctx_str = host
             except RuntimeError:
@@ -673,8 +744,9 @@ def _run_repl(skin: ReplSkin):
             args = shlex.split(cmd)
             # Re-invoke the Click main group with the parsed args
             # standalone_mode=False means Click won't call sys.exit
-            main.main(args=args, standalone_mode=False,
-                      obj={"as_json": False, "skin": skin})
+            main.main(
+                args=args, standalone_mode=False, obj={"as_json": False, "skin": skin}
+            )
         except SystemExit:
             pass
         except click.exceptions.Abort:

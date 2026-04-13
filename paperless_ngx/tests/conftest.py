@@ -6,10 +6,6 @@ never read or written during the test run.
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
-
 import pytest
 
 
@@ -30,5 +26,6 @@ def isolate_config(tmp_path, monkeypatch):
 
     # Also patch the session module's imports so they pick up the redirected paths
     import paperless_ngx.core.session as sess_mod
+
     # Reset singleton so each test starts fresh
     monkeypatch.setattr(sess_mod, "_session", None)
