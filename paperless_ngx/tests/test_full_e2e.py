@@ -13,15 +13,364 @@ Install the package before running:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
+
+
+class _FakePaperlessState:
+    def __init__(self):
+        self.token = "fake-paperless-token"
+        self.next_ids = {
+            "document": 100,
+            "tag": 10,
+            "correspondent": 10,
+            "document_type": 10,
+        }
+        self.documents = [
+            {
+                "id": 2,
+                "title": "Zulu Document",
+                "created": "2024-01-02",
+                "tags": [],
+                "document_type": None,
+                "correspondent": None,
+            },
+            {
+                "id": 1,
+                "title": "Alpha Document",
+                "created": "2024-01-01",
+                "tags": [],
+                "document_type": None,
+                "correspondent": None,
+            },
+        ]
+        self.tags: list[dict] = []
+        self.correspondents: list[dict] = []
+        self.document_types: list[dict] = []
+        self.tasks = [{"id": 1, "status": "SUCCESS", "task_file_name": "seed.pdf"}]
+
+    def _next_id(self, kind: str) -> int:
+        current = self.next_ids[kind]
+        self.next_ids[kind] += 1
+        return current
+
+    def create_document(self, title: str) -> dict:
+        doc = {
+            "id": self._next_id("document"),
+            "title": title,
+            "created": "2024-02-01",
+            "tags": [],
+            "document_type": None,
+            "correspondent": None,
+        }
+        self.documents.append(doc)
+        return doc
+
+    def create_tag(self, name: str, color: str) -> dict:
+        tag = {"id": self._next_id("tag"), "name": name, "color": color}
+        self.tags.append(tag)
+        return tag
+
+    def create_correspondent(self, name: str) -> dict:
+        corr = {"id": self._next_id("correspondent"), "name": name}
+        self.correspondents.append(corr)
+        return corr
+
+    def create_document_type(self, name: str) -> dict:
+        doc_type = {"id": self._next_id("document_type"), "name": name}
+        self.document_types.append(doc_type)
+        return doc_type
+
+
+def _decode_json_body(handler) -> dict:
+    length = int(handler.headers.get("Content-Length", "0"))
+    raw = handler.rfile.read(length) if length else b"{}"
+    if not raw:
+        return {}
+    return json.loads(raw.decode("utf-8"))
+
+
+def _extract_multipart_field(raw: bytes, field_name: str) -> str | None:
+    pattern = rf'name="{re.escape(field_name)}"\r\n\r\n([^\r\n]+)'.encode()
+    match = re.search(pattern, raw)
+    if not match:
+        return None
+    return match.group(1).decode("utf-8")
+
+
+def _make_fake_handler(state: _FakePaperlessState):
+    from http.server import BaseHTTPRequestHandler
+
+    class FakePaperlessHandler(BaseHTTPRequestHandler):
+        def _json_response(self, payload, status=200):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _text_response(self, payload: bytes, content_type: str = "application/pdf"):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Content-Disposition", 'attachment; filename="fake.bin"')
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _check_auth(self) -> bool:
+            if self.path == "/api/token/":
+                return True
+            return self.headers.get("Authorization") == f"Token {state.token}"
+
+        def _find_by_id(self, collection: list[dict], object_id: int) -> dict | None:
+            for item in collection:
+                if item["id"] == object_id:
+                    return item
+            return None
+
+        def log_message(self, *_args):
+            return
+
+        def do_GET(self):
+            if not self._check_auth():
+                self._json_response({"detail": "unauthorized"}, status=401)
+                return
+
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+
+            if parsed.path == "/api/status/":
+                self._json_response({"status": "ok"})
+                return
+            if parsed.path == "/api/statistics/":
+                self._json_response({"documents_total": len(state.documents)})
+                return
+            if parsed.path == "/api/search/":
+                query = qs.get("query", [""])[0].lower()
+                results = [
+                    {"document": doc}
+                    for doc in state.documents
+                    if query in doc["title"].lower()
+                ]
+                self._json_response({"count": len(results), "results": results})
+                return
+            if parsed.path == "/api/search/autocomplete/":
+                term = qs.get("term", [""])[0].lower()
+                suggestions = [
+                    doc["title"]
+                    for doc in state.documents
+                    if doc["title"].lower().startswith(term)
+                ]
+                self._json_response(suggestions[: int(qs.get("limit", ["10"])[0])])
+                return
+            if parsed.path == "/api/tasks/":
+                self._json_response(
+                    {"count": len(state.tasks), "next": None, "results": state.tasks}
+                )
+                return
+            if parsed.path.startswith("/api/tasks/"):
+                task_id = int(parsed.path.rstrip("/").split("/")[-1])
+                task = self._find_by_id(state.tasks, task_id)
+                if task is None:
+                    self._json_response({"detail": "not found"}, status=404)
+                    return
+                self._json_response(task)
+                return
+            if parsed.path == "/api/documents/":
+                documents = sorted(
+                    state.documents,
+                    key=lambda doc: doc.get("created", ""),
+                    reverse=qs.get("ordering", ["-created"])[0].startswith("-"),
+                )
+                query = qs.get("query", [""])[0].lower()
+                if query:
+                    documents = [
+                        doc for doc in documents if query in doc["title"].lower()
+                    ]
+                page_size = int(qs.get("page_size", ["25"])[0])
+                self._json_response(
+                    {
+                        "count": len(documents),
+                        "next": None,
+                        "previous": None,
+                        "results": documents[:page_size],
+                    }
+                )
+                return
+            if parsed.path.startswith("/api/documents/"):
+                parts = parsed.path.rstrip("/").split("/")
+                doc_id = int(parts[3])
+                doc = self._find_by_id(state.documents, doc_id)
+                if doc is None:
+                    self._json_response({"detail": "not found"}, status=404)
+                    return
+                if parts[-1] in {"download", "preview", "thumb"}:
+                    self._text_response(b"fake-binary")
+                    return
+                self._json_response(doc)
+                return
+            if parsed.path == "/api/tags/":
+                self._json_response(
+                    {"count": len(state.tags), "next": None, "results": state.tags}
+                )
+                return
+            if parsed.path.startswith("/api/tags/"):
+                tag_id = int(parsed.path.rstrip("/").split("/")[-1])
+                tag = self._find_by_id(state.tags, tag_id)
+                if tag is None:
+                    self._json_response({"detail": "not found"}, status=404)
+                    return
+                self._json_response(tag)
+                return
+            if parsed.path == "/api/correspondents/":
+                self._json_response(
+                    {
+                        "count": len(state.correspondents),
+                        "next": None,
+                        "results": state.correspondents,
+                    }
+                )
+                return
+            if parsed.path.startswith("/api/correspondents/"):
+                corr_id = int(parsed.path.rstrip("/").split("/")[-1])
+                corr = self._find_by_id(state.correspondents, corr_id)
+                if corr is None:
+                    self._json_response({"detail": "not found"}, status=404)
+                    return
+                self._json_response(corr)
+                return
+            if parsed.path == "/api/document_types/":
+                self._json_response(
+                    {
+                        "count": len(state.document_types),
+                        "next": None,
+                        "results": state.document_types,
+                    }
+                )
+                return
+            if parsed.path.startswith("/api/document_types/"):
+                doc_type_id = int(parsed.path.rstrip("/").split("/")[-1])
+                doc_type = self._find_by_id(state.document_types, doc_type_id)
+                if doc_type is None:
+                    self._json_response({"detail": "not found"}, status=404)
+                    return
+                self._json_response(doc_type)
+                return
+
+            self._json_response({"detail": "not found"}, status=404)
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/token/":
+                self._json_response({"token": state.token})
+                return
+            if not self._check_auth():
+                self._json_response({"detail": "unauthorized"}, status=401)
+                return
+            if parsed.path == "/api/documents/post_document/":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b""
+                title = _extract_multipart_field(raw, "title") or "Uploaded Document"
+                state.create_document(title)
+                self._json_response({"task_id": "fake-task-id"})
+                return
+            if parsed.path == "/api/tags/":
+                payload = _decode_json_body(self)
+                self._json_response(
+                    state.create_tag(payload["name"], payload.get("color", "#a6cee3")),
+                    status=201,
+                )
+                return
+            if parsed.path == "/api/correspondents/":
+                payload = _decode_json_body(self)
+                self._json_response(
+                    state.create_correspondent(payload["name"]),
+                    status=201,
+                )
+                return
+            if parsed.path == "/api/document_types/":
+                payload = _decode_json_body(self)
+                self._json_response(
+                    state.create_document_type(payload["name"]),
+                    status=201,
+                )
+                return
+            self._json_response({"detail": "not found"}, status=404)
+
+        def do_DELETE(self):
+            if not self._check_auth():
+                self._json_response({"detail": "unauthorized"}, status=401)
+                return
+            parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/documents/"):
+                doc_id = int(parsed.path.rstrip("/").split("/")[-1])
+                state.documents = [
+                    doc for doc in state.documents if doc["id"] != doc_id
+                ]
+            elif parsed.path.startswith("/api/tags/"):
+                tag_id = int(parsed.path.rstrip("/").split("/")[-1])
+                state.tags = [tag for tag in state.tags if tag["id"] != tag_id]
+            elif parsed.path.startswith("/api/correspondents/"):
+                corr_id = int(parsed.path.rstrip("/").split("/")[-1])
+                state.correspondents = [
+                    corr for corr in state.correspondents if corr["id"] != corr_id
+                ]
+            elif parsed.path.startswith("/api/document_types/"):
+                doc_type_id = int(parsed.path.rstrip("/").split("/")[-1])
+                state.document_types = [
+                    doc_type
+                    for doc_type in state.document_types
+                    if doc_type["id"] != doc_type_id
+                ]
+            self.send_response(204)
+            self.end_headers()
+
+    return FakePaperlessHandler
+
+
+def _start_fake_server():
+    from http.server import ThreadingHTTPServer
+
+    state = _FakePaperlessState()
+    handler = _make_fake_handler(state)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, state
+
+
+TEST_HOME = os.environ.get("HOME", "/tmp")
+_FAKE_SERVER = None
+
+if not os.environ.get("PAPERLESS_URL") or not os.environ.get("PAPERLESS_TOKEN"):
+    _FAKE_SERVER, _FAKE_STATE = _start_fake_server()
+    TEST_HOME = tempfile.mkdtemp(prefix="paperless-cli-e2e-home-")
+    os.environ["HOME"] = TEST_HOME
+    os.environ["PAPERLESS_URL"] = f"http://127.0.0.1:{_FAKE_SERVER.server_port}"
+    os.environ["PAPERLESS_TOKEN"] = _FAKE_STATE.token
+
+    import paperless_ngx.utils.paperless_backend as _be_mod
+
+    _be_mod.CONFIG_PATH = str(Path(TEST_HOME) / ".config/paperless-cli/config.json")
+    _be_mod.SESSION_PATH = str(Path(TEST_HOME) / "paperless-cli-session.json")
+
+    @atexit.register
+    def _shutdown_fake_server():
+        if _FAKE_SERVER is not None:
+            _FAKE_SERVER.shutdown()
+            _FAKE_SERVER.server_close()
 
 # ── Constants & marks ─────────────────────────────────────────────────────────
 
@@ -76,11 +425,13 @@ def _run_cli(
     # Start from a minimal environment to avoid picking up real config
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/tmp"),
+        "HOME": os.environ.get("HOME", TEST_HOME),
         # Forward Python path so the installed package is importable
         "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
         "LANG": "en_US.UTF-8",
         "TERM": "dumb",
+        "PAPERLESS_URL": PAPERLESS_URL,
+        "PAPERLESS_TOKEN": PAPERLESS_TOKEN,
     }
     if extra_env:
         env.update(extra_env)
@@ -318,10 +669,12 @@ class TestCLISubprocess:
         assert result.returncode == 0
         for group in (
             "document",
+            "search",
             "tag",
             "correspondent",
             "doctype",
             "project",
+            "task",
             "export",
             "status",
         ):
@@ -356,6 +709,20 @@ class TestCLISubprocess:
         result = _run_cli("project", "--help")
         assert result.returncode == 0
         for sub in ("init", "info", "ping"):
+            assert sub in result.stdout
+
+    def test_search_help(self):
+        """search --help lists search subcommands."""
+        result = _run_cli("search", "--help")
+        assert result.returncode == 0
+        for sub in ("query", "autocomplete"):
+            assert sub in result.stdout
+
+    def test_task_help(self):
+        """task --help lists task subcommands."""
+        result = _run_cli("task", "--help")
+        assert result.returncode == 0
+        for sub in ("list", "get"):
             assert sub in result.stdout
 
     # ── Error path: missing config ──
@@ -502,3 +869,25 @@ class TestCLISubprocess:
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout)
         assert data["status"] == "ok"
+
+    @SKIP_E2E
+    def test_search_query_json(self):
+        """search query --json returns a JSON object."""
+        from paperless_ngx.utils.paperless_backend import save_config
+
+        save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
+        result = _run_cli("search", "query", "the", "--json")
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict)
+
+    @SKIP_E2E
+    def test_task_list_json_returns_list(self):
+        """task list --json returns a JSON array."""
+        from paperless_ngx.utils.paperless_backend import save_config
+
+        save_config(PAPERLESS_URL, PAPERLESS_TOKEN)
+        result = _run_cli("task", "list", "--json")
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)

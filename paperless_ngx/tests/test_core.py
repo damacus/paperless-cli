@@ -31,6 +31,7 @@ from paperless_ngx.core.doc_types import (
 )
 from paperless_ngx.core.documents import (
     _guess_mime,
+    build_document_query_params,
     delete_document,
     download_document,
     download_document_asset,
@@ -42,8 +43,10 @@ from paperless_ngx.core.documents import (
     update_document,
     upload_document,
 )
+from paperless_ngx.core.search import autocomplete_search, query_search
 from paperless_ngx.core.session import Session
 from paperless_ngx.core.tags import create_tag, delete_tag, get_tag, list_tags
+from paperless_ngx.core.tasks import get_task, list_tasks
 from paperless_ngx.paperless_ngx_cli import _REPL_HELP, _pretty_print, main
 from paperless_ngx.utils.paperless_backend import (
     PaperlessBackend,
@@ -437,6 +440,32 @@ class TestPaperlessBackend:
 
 
 class TestDocuments:
+    def test_build_document_query_params_with_extended_filters(self):
+        params = build_document_query_params(
+            query="invoice",
+            tag="urgent",
+            tag_id=5,
+            correspondent="ACME",
+            correspondent_id=7,
+            doc_type="Invoice",
+            doc_type_id=9,
+            created_after="2024-01-01",
+            created_before="2024-12-31",
+            order_by="title",
+            page_size=10,
+            page=2,
+        )
+        assert params["query"] == "invoice"
+        assert params["tags__name__icontains"] == "urgent"
+        assert params["tags__id__in"] == "5"
+        assert params["correspondent__id"] == 7
+        assert params["document_type__id"] == 9
+        assert params["created__date__gt"] == "2024-01-01"
+        assert params["created__date__lt"] == "2024-12-31"
+        assert params["ordering"] == "title"
+        assert params["page_size"] == 10
+        assert params["page"] == 2
+
     @resp_lib.activate
     def test_list_no_filter(self):
         resp_lib.add(
@@ -475,6 +504,18 @@ class TestDocuments:
         assert "tags__name__icontains=urgent" in resp_lib.calls[0].request.url
 
     @resp_lib.activate
+    def test_list_with_tag_id_filter(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
+        backend = make_backend()
+        list_documents(backend, tag_id=12)
+        assert "tags__id__in=12" in resp_lib.calls[0].request.url
+
+    @resp_lib.activate
     def test_list_with_correspondent_filter(self):
         resp_lib.add(
             resp_lib.GET,
@@ -497,6 +538,26 @@ class TestDocuments:
         backend = make_backend()
         list_documents(backend, doc_type="Invoice")
         assert "document_type__name__icontains=Invoice" in resp_lib.calls[0].request.url
+
+    @resp_lib.activate
+    def test_list_with_date_filters_and_ordering(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
+        backend = make_backend()
+        list_documents(
+            backend,
+            created_after="2024-01-01",
+            created_before="2024-12-31",
+            order_by="title",
+        )
+        url = resp_lib.calls[0].request.url
+        assert "created__date__gt=2024-01-01" in url
+        assert "created__date__lt=2024-12-31" in url
+        assert "ordering=title" in url
 
     @resp_lib.activate
     def test_list_page_size_respected(self):
@@ -697,6 +758,91 @@ class TestDocuments:
         result = search_documents(backend, "invoice 2024")
         assert result["count"] == 2
         assert "query=invoice+2024" in resp_lib.calls[0].request.url
+
+    @resp_lib.activate
+    def test_search_documents_with_filters(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 1, "results": [{"id": 9}]},
+            status=200,
+        )
+        backend = make_backend()
+        search_documents(
+            backend,
+            "invoice 2024",
+            tag_id=3,
+            created_after="2024-01-01",
+            order_by="-added",
+        )
+        url = resp_lib.calls[0].request.url
+        assert "tags__id__in=3" in url
+        assert "created__date__gt=2024-01-01" in url
+        assert "ordering=-added" in url
+
+
+class TestGlobalSearch:
+    @resp_lib.activate
+    def test_query_search(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/search/",
+            json={"count": 1, "results": [{"document": {"id": 1}}]},
+            status=200,
+        )
+        backend = make_backend()
+        result = query_search(backend, "invoice", page_size=5, page=2)
+        assert result["count"] == 1
+        url = resp_lib.calls[0].request.url
+        assert "query=invoice" in url
+        assert "page_size=5" in url
+        assert "page=2" in url
+
+    @resp_lib.activate
+    def test_autocomplete_search(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/search/autocomplete/",
+            json=["invoice", "invoices"],
+            status=200,
+        )
+        backend = make_backend()
+        result = autocomplete_search(backend, "inv", limit=7)
+        assert result == ["invoice", "invoices"]
+        url = resp_lib.calls[0].request.url
+        assert "term=inv" in url
+        assert "limit=7" in url
+
+
+class TestTasks:
+    @resp_lib.activate
+    def test_list_tasks(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tasks/",
+            json={
+                "count": 1,
+                "next": None,
+                "results": [{"id": 1, "status": "SUCCESS"}],
+            },
+            status=200,
+        )
+        backend = make_backend()
+        result = list_tasks(backend)
+        assert len(result) == 1
+        assert result[0]["id"] == 1
+
+    @resp_lib.activate
+    def test_get_task(self):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tasks/4/",
+            json={"id": 4, "status": "PENDING"},
+            status=200,
+        )
+        backend = make_backend()
+        result = get_task(backend, 4)
+        assert result["status"] == "PENDING"
 
 
 # ── TestTags ──────────────────────────────────────────────────────────────────
@@ -1189,10 +1335,12 @@ class TestCLILayer:
         assert result.exit_code == 0
         for group in (
             "document",
+            "search",
             "tag",
             "correspondent",
             "doctype",
             "project",
+            "task",
             "export",
             "status",
             "repl",
@@ -1214,6 +1362,20 @@ class TestCLILayer:
             "delete",
             "search",
         ):
+            assert cmd in result.output
+
+    def test_search_help(self):
+        runner = self._runner()
+        result = runner.invoke(main, ["search", "--help"])
+        assert result.exit_code == 0
+        for cmd in ("query", "autocomplete"):
+            assert cmd in result.output
+
+    def test_task_help(self):
+        runner = self._runner()
+        result = runner.invoke(main, ["task", "--help"])
+        assert result.exit_code == 0
+        for cmd in ("list", "get"):
             assert cmd in result.output
 
     def test_tag_help(self):
@@ -1312,6 +1474,35 @@ class TestCLILayer:
         assert "query=invoice" in resp_lib.calls[0].request.url
 
     @resp_lib.activate
+    def test_document_list_with_extended_filters(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 0, "results": []},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main,
+            [
+                "document",
+                "list",
+                "--tag-id",
+                "4",
+                "--created-after",
+                "2024-01-01",
+                "--order-by",
+                "title",
+            ],
+        )
+        assert result.exit_code == 0
+        url = resp_lib.calls[0].request.url
+        assert "tags__id__in=4" in url
+        assert "created__date__gt=2024-01-01" in url
+        assert "ordering=title" in url
+
+    @resp_lib.activate
     def test_document_get_json(self):
         save_config(BASE_URL, "tok")
         resp_lib.add(
@@ -1340,6 +1531,105 @@ class TestCLILayer:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["count"] == 1
+
+    @resp_lib.activate
+    def test_document_search_with_filters_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/",
+            json={"count": 1, "results": [{"id": 7}]},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main,
+            [
+                "document",
+                "search",
+                "test query",
+                "--tag-id",
+                "2",
+                "--created-before",
+                "2024-12-31",
+                "--order-by",
+                "-added",
+                "--json",
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["count"] == 1
+        url = resp_lib.calls[0].request.url
+        assert "tags__id__in=2" in url
+        assert "created__date__lt=2024-12-31" in url
+        assert "ordering=-added" in url
+
+    @resp_lib.activate
+    def test_search_query_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/search/",
+            json={"count": 1, "results": [{"rank": 0}]},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["search", "query", "invoice", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["count"] == 1
+
+    @resp_lib.activate
+    def test_search_autocomplete_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/search/autocomplete/",
+            json=["invoice", "invoices"],
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main, ["search", "autocomplete", "inv", "--limit", "5", "--json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data == ["invoice", "invoices"]
+
+    @resp_lib.activate
+    def test_task_list_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tasks/",
+            json={
+                "count": 1,
+                "next": None,
+                "results": [{"id": 1, "status": "SUCCESS"}],
+            },
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["task", "list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["status"] == "SUCCESS"
+
+    @resp_lib.activate
+    def test_task_get_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tasks/1/",
+            json={"id": 1, "status": "SUCCESS"},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["task", "get", "1", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == 1
 
     @resp_lib.activate
     def test_document_delete_with_yes_flag(self):
@@ -1817,6 +2107,10 @@ class TestReplMetadata:
     def test_repl_help_covers_new_discoverability_commands(self):
         assert "document preview <id>" in _REPL_HELP
         assert "document thumb <id>" in _REPL_HELP
+        assert "search query <text>" in _REPL_HELP
+        assert "search autocomplete <term>" in _REPL_HELP
         assert "tag get <id>" in _REPL_HELP
         assert "correspondent get <id>" in _REPL_HELP
         assert "doctype get <id>" in _REPL_HELP
+        assert "task list" in _REPL_HELP
+        assert "task get <id>" in _REPL_HELP

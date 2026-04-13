@@ -39,10 +39,14 @@ Common commands:
 
 ```bash
 paperless document list --query "invoice 2024"
+paperless document list --tag-id 7 --created-after 2024-01-01 --order-by title
 paperless document get 42
 paperless document upload ~/Downloads/invoice.pdf --title "Invoice Q1"
 paperless document download 42 --output-dir ~/Downloads
 paperless document preview 42 --output-dir ~/Downloads
+paperless search query "invoice acme"
+paperless search autocomplete inv
+paperless task list
 paperless tag get 7
 paperless --json document list
 paperless repl
@@ -54,9 +58,11 @@ paperless repl
 | --- | --- |
 | `project` | `init`, `info`, `ping` |
 | `document` | `list`, `get`, `upload`, `download`, `preview`, `thumb`, `update`, `delete`, `search` |
+| `search` | `query`, `autocomplete` |
 | `tag` | `list`, `get`, `create`, `delete` |
 | `correspondent` | `list`, `get`, `create`, `delete` |
 | `doctype` | `list`, `get`, `create`, `delete` |
+| `task` | `list`, `get` |
 | `export` | `bulk` |
 | top-level | `status`, `repl` |
 
@@ -69,6 +75,8 @@ Implemented Paperless endpoint coverage:
 | `project ping` | `GET /api/status/` |
 | `project info` | `GET /api/statistics/` |
 | `document list`, `document search` | `GET /api/documents/` |
+| `search query` | `GET /api/search/` |
+| `search autocomplete` | `GET /api/search/autocomplete/` |
 | `document get` | `GET /api/documents/<id>/` |
 | `document upload` | `POST /api/documents/post_document/` |
 | `document download` | `GET /api/documents/<id>/download/` |
@@ -76,6 +84,7 @@ Implemented Paperless endpoint coverage:
 | `document thumb` | `GET /api/documents/<id>/thumb/` |
 | `document update` | `PATCH /api/documents/<id>/` |
 | `document delete` | `DELETE /api/documents/<id>/` |
+| `task *` | `/api/tasks/` |
 | `tag *` | `/api/tags/` |
 | `correspondent *` | `/api/correspondents/` |
 | `doctype *` | `/api/document_types/` |
@@ -85,9 +94,29 @@ Not implemented yet:
 
 - `documents/bulk_edit`
 - `documents/reprocess`
-- global search/autocomplete endpoints
-- saved views, storage paths, tasks, users, groups
+- saved views, storage paths, users, groups
 - mail accounts, mail rules, custom fields, config
+
+## Search Modes
+
+There are now two search entry points:
+
+- `paperless document search`
+  Searches only documents via `/api/documents/` and supports document filters
+  like tag IDs, correspondent IDs, date ranges, and ordering.
+- `paperless search query`
+  Uses Paperless global search via `/api/search/` and can return matches across
+  indexed resource types.
+- `paperless search autocomplete`
+  Returns term suggestions from `/api/search/autocomplete/` for partial input.
+
+Useful document filter examples:
+
+```bash
+paperless document list --tag urgent --order-by -created
+paperless document list --tag-id 4 --correspondent-id 2 --created-before 2024-12-31
+paperless document search "contract" --type-id 3 --order-by title
+```
 
 ## REPL And Session Behavior
 

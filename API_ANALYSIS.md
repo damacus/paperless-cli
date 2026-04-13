@@ -20,6 +20,9 @@ The current CLI intentionally implements a narrow subset of the API centered on:
 
 - connection setup and status
 - document listing, retrieval, upload, download, preview, thumbnail, update, delete
+- document filtering, ordering, and search queries
+- global search and autocomplete
+- task inspection
 - tags, correspondents, and document types
 - bulk export/download
 
@@ -27,8 +30,7 @@ Notable endpoints currently analyzed but not exposed by the CLI include:
 
 - `documents/bulk_edit`
 - `documents/reprocess`
-- `/api/search/` and `/api/search/autocomplete/`
-- saved views, storage paths, tasks
+- saved views, storage paths
 - users, groups
 - mail accounts, mail rules
 - custom fields, config

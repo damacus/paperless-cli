@@ -16,8 +16,12 @@ def isolate_config(tmp_path, monkeypatch):
     This prevents tests from reading/writing the real
     ~/.config/paperless-cli/config.json or /tmp/paperless-cli-session.json.
     """
-    fake_config = str(tmp_path / "config.json")
-    fake_session = str(tmp_path / "session.json")
+    fake_home = tmp_path / "home"
+    fake_config = str(fake_home / ".config/paperless-cli/config.json")
+    fake_session = str(fake_home / "paperless-cli-session.json")
+
+    fake_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(fake_home))
 
     import paperless_ngx.utils.paperless_backend as be_mod
 

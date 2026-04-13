@@ -193,17 +193,59 @@ def document():
 @document.command("list")
 @click.option("--query", "-q", default=None, help="Full-text search query.")
 @click.option("--tag", "-t", default=None, help="Filter by tag name.")
+@click.option("--tag-id", type=int, default=None, help="Filter by tag ID.")
 @click.option(
     "--correspondent", "-c", default=None, help="Filter by correspondent name."
 )
+@click.option(
+    "--correspondent-id", type=int, default=None, help="Filter by correspondent ID."
+)
 @click.option("--type", "doc_type", default=None, help="Filter by document type name.")
+@click.option(
+    "--type-id",
+    "doc_type_id",
+    type=int,
+    default=None,
+    help="Filter by document type ID.",
+)
+@click.option(
+    "--created-after",
+    default=None,
+    help="Filter to documents created after this YYYY-MM-DD date.",
+)
+@click.option(
+    "--created-before",
+    default=None,
+    help="Filter to documents created before this YYYY-MM-DD date.",
+)
+@click.option(
+    "--order-by",
+    default="-created",
+    show_default=True,
+    help="Paperless ordering expression such as -created, title, or -added.",
+)
 @click.option(
     "--page-size", default=25, show_default=True, help="Number of results per page."
 )
 @click.option("--page", default=1, show_default=True, help="Page number.")
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
-def document_list(ctx, query, tag, correspondent, doc_type, page_size, page, as_json):
+def document_list(
+    ctx,
+    query,
+    tag,
+    tag_id,
+    correspondent,
+    correspondent_id,
+    doc_type,
+    doc_type_id,
+    created_after,
+    created_before,
+    order_by,
+    page_size,
+    page,
+    as_json,
+):
     """List documents with optional filters."""
     from paperless_ngx.core.documents import list_documents
 
@@ -214,8 +256,14 @@ def document_list(ctx, query, tag, correspondent, doc_type, page_size, page, as_
         backend,
         query=query,
         tag=tag,
+        tag_id=tag_id,
         correspondent=correspondent,
+        correspondent_id=correspondent_id,
         doc_type=doc_type,
+        doc_type_id=doc_type_id,
+        created_after=created_after,
+        created_before=created_before,
+        order_by=order_by,
         page_size=page_size,
         page=page,
     )
@@ -436,10 +484,58 @@ def document_delete(ctx, doc_id, yes, as_json):
 
 @document.command("search")
 @click.argument("query")
+@click.option("--tag", "-t", default=None, help="Filter by tag name.")
+@click.option("--tag-id", type=int, default=None, help="Filter by tag ID.")
+@click.option(
+    "--correspondent", "-c", default=None, help="Filter by correspondent name."
+)
+@click.option(
+    "--correspondent-id", type=int, default=None, help="Filter by correspondent ID."
+)
+@click.option("--type", "doc_type", default=None, help="Filter by document type name.")
+@click.option(
+    "--type-id",
+    "doc_type_id",
+    type=int,
+    default=None,
+    help="Filter by document type ID.",
+)
+@click.option(
+    "--created-after",
+    default=None,
+    help="Filter to documents created after this YYYY-MM-DD date.",
+)
+@click.option(
+    "--created-before",
+    default=None,
+    help="Filter to documents created before this YYYY-MM-DD date.",
+)
+@click.option(
+    "--order-by",
+    default="-created",
+    show_default=True,
+    help="Paperless ordering expression such as -created, title, or -added.",
+)
 @click.option("--page-size", default=25, show_default=True)
+@click.option("--page", default=1, show_default=True, help="Page number.")
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
-def document_search(ctx, query, page_size, as_json):
+def document_search(
+    ctx,
+    query,
+    tag,
+    tag_id,
+    correspondent,
+    correspondent_id,
+    doc_type,
+    doc_type_id,
+    created_after,
+    created_before,
+    order_by,
+    page_size,
+    page,
+    as_json,
+):
     """Full-text search documents."""
     from paperless_ngx.core.documents import search_documents
 
@@ -448,7 +544,109 @@ def document_search(ctx, query, page_size, as_json):
     backend = _get_backend()
     sess = get_session()
     sess.last_query = query
-    result = search_documents(backend, query, page_size=page_size)
+    result = search_documents(
+        backend,
+        query,
+        tag=tag,
+        tag_id=tag_id,
+        correspondent=correspondent,
+        correspondent_id=correspondent_id,
+        doc_type=doc_type,
+        doc_type_id=doc_type_id,
+        created_after=created_after,
+        created_before=created_before,
+        order_by=order_by,
+        page_size=page_size,
+        page=page,
+    )
+    _output(result, as_json, skin)
+
+
+# ── search group ──────────────────────────────────────────────────────────────
+
+
+@main.group()
+def search():
+    """Global Paperless search commands."""
+
+
+@search.command("query")
+@click.argument("query")
+@click.option(
+    "--page-size",
+    default=25,
+    show_default=True,
+    help="Number of results per page.",
+)
+@click.option("--page", default=1, show_default=True, help="Page number.")
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def search_query_cmd(ctx, query, page_size, page, as_json):
+    """Search across Paperless indexed resources."""
+    from paperless_ngx.core.search import query_search
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = query_search(backend, query, page_size=page_size, page=page)
+    _output(result, as_json, skin)
+
+
+@search.command("autocomplete")
+@click.argument("term")
+@click.option(
+    "--limit",
+    default=10,
+    show_default=True,
+    help="Maximum number of autocomplete suggestions to return.",
+)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def search_autocomplete_cmd(ctx, term, limit, as_json):
+    """Fetch autocomplete suggestions for a partial search term."""
+    from paperless_ngx.core.search import autocomplete_search
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = autocomplete_search(backend, term, limit=limit)
+    _output(result, as_json, skin)
+
+
+# ── task group ────────────────────────────────────────────────────────────────
+
+
+@main.group()
+def task():
+    """Inspect Paperless background tasks."""
+
+
+@task.command("list")
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def task_list(ctx, as_json):
+    """List background tasks."""
+    from paperless_ngx.core.tasks import list_tasks
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = list_tasks(backend)
+    _output(result, as_json, skin)
+
+
+@task.command("get")
+@click.argument("task_id", type=int)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def task_get(ctx, task_id, as_json):
+    """Get a single background task by ID."""
+    from paperless_ngx.core.tasks import get_task
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = get_task(backend, task_id)
     _output(result, as_json, skin)
 
 
@@ -810,6 +1008,8 @@ _REPL_HELP = {
     "document search <q>": "Search documents",
     "document update <id>": "Update document metadata",
     "document delete <id>": "Delete a document",
+    "search query <text>": "Run a global cross-resource search",
+    "search autocomplete <term>": "Get search term suggestions",
     "tag list": "List tags",
     "tag get <id>": "Get tag details",
     "tag create <name>": "Create a tag",
@@ -819,6 +1019,8 @@ _REPL_HELP = {
     "correspondent create": "Create a correspondent",
     "doctype list": "List document types",
     "doctype get <id>": "Get document type details",
+    "task list": "List Paperless background tasks",
+    "task get <id>": "Get task details",
     "export bulk <ids>": "Bulk download documents",
     "project info": "Show connection info",
     "project ping": "Test connection",

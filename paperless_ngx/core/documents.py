@@ -13,8 +13,14 @@ def list_documents(
     backend: PaperlessBackend,
     query: str | None = None,
     tag: str | None = None,
+    tag_id: int | None = None,
     correspondent: str | None = None,
+    correspondent_id: int | None = None,
     doc_type: str | None = None,
+    doc_type_id: int | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    order_by: str = "-created",
     page_size: int = 25,
     page: int = 1,
 ) -> dict[str, Any]:
@@ -24,27 +30,34 @@ def list_documents(
         backend: Authenticated PaperlessBackend instance.
         query: Full-text search query string.
         tag: Filter by tag name (partial match supported via API).
+        tag_id: Filter by tag ID.
         correspondent: Filter by correspondent name.
+        correspondent_id: Filter by correspondent ID.
         doc_type: Filter by document type name.
+        doc_type_id: Filter by document type ID.
+        created_after: Filter to documents created after the given date.
+        created_before: Filter to documents created before the given date.
+        order_by: Paperless ordering expression (e.g. ``-created`` or ``title``).
         page_size: Number of results per page.
         page: Page number (1-based).
 
     Returns:
         Dict with 'count', 'next', 'previous', 'results' keys.
     """
-    params: dict[str, Any] = {
-        "page_size": page_size,
-        "page": page,
-        "ordering": "-created",
-    }
-    if query:
-        params["query"] = query
-    if tag:
-        params["tags__name__icontains"] = tag
-    if correspondent:
-        params["correspondent__name__icontains"] = correspondent
-    if doc_type:
-        params["document_type__name__icontains"] = doc_type
+    params = build_document_query_params(
+        query=query,
+        tag=tag,
+        tag_id=tag_id,
+        correspondent=correspondent,
+        correspondent_id=correspondent_id,
+        doc_type=doc_type,
+        doc_type_id=doc_type_id,
+        created_after=created_after,
+        created_before=created_before,
+        order_by=order_by,
+        page_size=page_size,
+        page=page,
+    )
 
     return cast(dict[str, Any], backend.get("documents/", params=params))
 
@@ -249,22 +262,99 @@ def delete_document(backend: PaperlessBackend, doc_id: int) -> None:
 def search_documents(
     backend: PaperlessBackend,
     query: str,
+    tag: str | None = None,
+    tag_id: int | None = None,
+    correspondent: str | None = None,
+    correspondent_id: int | None = None,
+    doc_type: str | None = None,
+    doc_type_id: int | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    order_by: str = "-created",
     page_size: int = 25,
+    page: int = 1,
 ) -> dict[str, Any]:
     """Full-text search documents.
 
     Args:
         backend: Authenticated PaperlessBackend instance.
         query: Search query string.
+        tag: Filter by tag name.
+        tag_id: Filter by tag ID.
+        correspondent: Filter by correspondent name.
+        correspondent_id: Filter by correspondent ID.
+        doc_type: Filter by document type name.
+        doc_type_id: Filter by document type ID.
+        created_after: Filter to documents created after the given date.
+        created_before: Filter to documents created before the given date.
+        order_by: Paperless ordering expression.
         page_size: Maximum results to return.
+        page: Page number (1-based).
 
     Returns:
         Dict with 'count' and 'results'.
     """
     return cast(
         dict[str, Any],
-        backend.get("documents/", params={"query": query, "page_size": page_size}),
+        backend.get(
+            "documents/",
+            params=build_document_query_params(
+                query=query,
+                tag=tag,
+                tag_id=tag_id,
+                correspondent=correspondent,
+                correspondent_id=correspondent_id,
+                doc_type=doc_type,
+                doc_type_id=doc_type_id,
+                created_after=created_after,
+                created_before=created_before,
+                order_by=order_by,
+                page_size=page_size,
+                page=page,
+            ),
+        ),
     )
+
+
+def build_document_query_params(
+    query: str | None = None,
+    tag: str | None = None,
+    tag_id: int | None = None,
+    correspondent: str | None = None,
+    correspondent_id: int | None = None,
+    doc_type: str | None = None,
+    doc_type_id: int | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    order_by: str = "-created",
+    page_size: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """Build query parameters for the document list/search endpoints."""
+    params: dict[str, Any] = {
+        "page_size": page_size,
+        "page": page,
+        "ordering": order_by,
+    }
+    if query:
+        params["query"] = query
+    if tag:
+        params["tags__name__icontains"] = tag
+    if tag_id is not None:
+        params["tags__id__in"] = str(tag_id)
+    if correspondent:
+        params["correspondent__name__icontains"] = correspondent
+    if correspondent_id is not None:
+        params["correspondent__id"] = correspondent_id
+    if doc_type:
+        params["document_type__name__icontains"] = doc_type
+    if doc_type_id is not None:
+        params["document_type__id"] = doc_type_id
+    if created_after:
+        params["created__date__gt"] = created_after
+    if created_before:
+        params["created__date__lt"] = created_before
+    return params
 
 
 def _guess_mime(path: Path) -> str:
