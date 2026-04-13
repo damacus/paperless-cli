@@ -112,13 +112,21 @@ def project():
     prompt="Paperless-ngx URL",
     help="Base URL of the server (e.g. http://localhost:8000)",
 )
-@click.option("--token", default=None, help="API authentication token.")
-@click.option("--username", default=None, help="Username (alternative to --token).")
+@click.option(
+    "--token",
+    default=None,
+    help="API authentication token. Prefer this over username/password.",
+)
+@click.option(
+    "--username",
+    default=None,
+    help="Username used to exchange credentials for an API token.",
+)
 @click.option(
     "--password",
     default=None,
     hide_input=True,
-    help="Password (alternative to --token).",
+    help="Password paired with --username to acquire and save a token.",
 )
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
@@ -300,19 +308,84 @@ def document_download(ctx, doc_id, output_dir, original, as_json):
     _output(result, as_json, skin)
 
 
+@document.command("preview")
+@click.argument("doc_id", type=int)
+@click.option(
+    "--output-dir",
+    "-o",
+    default=".",
+    show_default=True,
+    help="Directory to save the preview file.",
+)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def document_preview(ctx, doc_id, output_dir, as_json):
+    """Download a document preview asset."""
+    from paperless_ngx.core.documents import download_document_preview
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    path = download_document_preview(backend, doc_id, output_dir=output_dir)
+    result = {"doc_id": doc_id, "path": path, "status": "ok", "asset": "preview"}
+    if not as_json:
+        skin.success(f"Preview downloaded to: {path}")
+    _output(result, as_json, skin)
+
+
+@document.command("thumb")
+@click.argument("doc_id", type=int)
+@click.option(
+    "--output-dir",
+    "-o",
+    default=".",
+    show_default=True,
+    help="Directory to save the thumbnail file.",
+)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def document_thumb(ctx, doc_id, output_dir, as_json):
+    """Download a document thumbnail asset."""
+    from paperless_ngx.core.documents import download_document_thumbnail
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    path = download_document_thumbnail(backend, doc_id, output_dir=output_dir)
+    result = {"doc_id": doc_id, "path": path, "status": "ok", "asset": "thumb"}
+    if not as_json:
+        skin.success(f"Thumbnail downloaded to: {path}")
+    _output(result, as_json, skin)
+
+
 @document.command("update")
 @click.argument("doc_id", type=int)
 @click.option("--title", default=None)
-@click.option("--correspondent-id", type=int, default=None)
-@click.option("--type-id", "document_type_id", type=int, default=None)
+@click.option(
+    "--correspondent-id",
+    type=int,
+    default=None,
+    help="Set the correspondent by numeric ID.",
+)
+@click.option(
+    "--type-id",
+    "document_type_id",
+    type=int,
+    default=None,
+    help="Set the document type by numeric ID.",
+)
 @click.option(
     "--tag-id",
     "tag_ids",
     type=int,
     multiple=True,
-    help="Tag IDs (replaces all existing tags).",
+    help="Tag IDs to set on the document. Replaces the full existing tag list.",
 )
-@click.option("--created", default=None, help="Created date (YYYY-MM-DD).")
+@click.option(
+    "--created",
+    default=None,
+    help="Override the document created date in YYYY-MM-DD format.",
+)
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
 def document_update(
@@ -441,6 +514,21 @@ def tag_delete(ctx, tag_id, yes, as_json):
     _output(result, as_json, skin)
 
 
+@tag.command("get")
+@click.argument("tag_id", type=int)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def tag_get(ctx, tag_id, as_json):
+    """Get a single tag by ID."""
+    from paperless_ngx.core.tags import get_tag
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = get_tag(backend, tag_id)
+    _output(result, as_json, skin)
+
+
 # ── correspondent group ───────────────────────────────────────────────────────
 
 
@@ -499,6 +587,21 @@ def correspondent_delete(ctx, correspondent_id, yes, as_json):
     result = {"correspondent_id": correspondent_id, "status": "deleted"}
     if not as_json:
         skin.success(f"Deleted correspondent {correspondent_id}")
+    _output(result, as_json, skin)
+
+
+@correspondent.command("get")
+@click.argument("correspondent_id", type=int)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def correspondent_get(ctx, correspondent_id, as_json):
+    """Get a single correspondent by ID."""
+    from paperless_ngx.core.correspondents import get_correspondent
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = get_correspondent(backend, correspondent_id)
     _output(result, as_json, skin)
 
 
@@ -563,6 +666,21 @@ def doctype_delete(ctx, doc_type_id, yes, as_json):
     _output(result, as_json, skin)
 
 
+@doctype.command("get")
+@click.argument("doc_type_id", type=int)
+@click.option("--json", "as_json", is_flag=True, default=False)
+@click.pass_context
+def doctype_get(ctx, doc_type_id, as_json):
+    """Get a single document type by ID."""
+    from paperless_ngx.core.doc_types import get_doc_type
+
+    as_json = as_json or ctx.obj.get("as_json", False)
+    skin = ctx.obj["skin"]
+    backend = _get_backend()
+    result = get_doc_type(backend, doc_type_id)
+    _output(result, as_json, skin)
+
+
 # ── export group ──────────────────────────────────────────────────────────────
 
 
@@ -578,15 +696,20 @@ def export():
     "-o",
     default="./paperless-export",
     show_default=True,
-    help="Directory to save files.",
+    help="Directory to save exported files or the generated ZIP archive.",
 )
-@click.option("--original", is_flag=True, default=False)
+@click.option(
+    "--original",
+    is_flag=True,
+    default=False,
+    help="Export original files instead of archived documents when supported.",
+)
 @click.option(
     "--zip",
     "as_zip",
     is_flag=True,
     default=False,
-    help="Download as a single ZIP file.",
+    help="Download all requested documents as a single ZIP archive.",
 )
 @click.option("--json", "as_json", is_flag=True, default=False)
 @click.pass_context
@@ -682,15 +805,20 @@ _REPL_HELP = {
     "document get <id>": "Get document details",
     "document upload <file>": "Upload a file",
     "document download <id>": "Download a document",
+    "document preview <id>": "Download the document preview asset",
+    "document thumb <id>": "Download the document thumbnail asset",
     "document search <q>": "Search documents",
     "document update <id>": "Update document metadata",
     "document delete <id>": "Delete a document",
     "tag list": "List tags",
+    "tag get <id>": "Get tag details",
     "tag create <name>": "Create a tag",
     "tag delete <id>": "Delete a tag",
     "correspondent list": "List correspondents",
+    "correspondent get <id>": "Get correspondent details",
     "correspondent create": "Create a correspondent",
     "doctype list": "List document types",
+    "doctype get <id>": "Get document type details",
     "export bulk <ids>": "Bulk download documents",
     "project info": "Show connection info",
     "project ping": "Test connection",

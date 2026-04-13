@@ -1,5 +1,9 @@
 # Paperless-ngx API Analysis
 
+This document is a Paperless API reference and roadmap input for the CLI. It is
+not a statement that every endpoint listed below is implemented in
+`paperless-ngx-cli`.
+
 ## Source Location
 
 Cloned from: https://github.com/paperless-ngx/paperless-ngx (depth=1)
@@ -9,6 +13,25 @@ Analysis date: 2026-03-12
 
 Paperless-ngx is a Django application with a Django REST Framework (DRF) API.
 The CLI harness communicates exclusively via HTTP to the REST API.
+
+## Current CLI Coverage
+
+The current CLI intentionally implements a narrow subset of the API centered on:
+
+- connection setup and status
+- document listing, retrieval, upload, download, preview, thumbnail, update, delete
+- tags, correspondents, and document types
+- bulk export/download
+
+Notable endpoints currently analyzed but not exposed by the CLI include:
+
+- `documents/bulk_edit`
+- `documents/reprocess`
+- `/api/search/` and `/api/search/autocomplete/`
+- saved views, storage paths, tasks
+- users, groups
+- mail accounts, mail rules
+- custom fields, config
 
 ## API Base URL
 

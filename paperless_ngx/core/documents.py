@@ -124,15 +124,39 @@ def download_document(
     Returns:
         The local path where the file was saved.
     """
-    endpoint = f"documents/{doc_id}/download/"
-    params = {}
-    if original:
-        params["original"] = "true"
+    params = {"original": "true"} if original else None
+    return download_document_asset(
+        backend,
+        doc_id,
+        asset="download",
+        output_dir=output_dir,
+        params=params,
+    )
 
-    resp = backend.get_raw(endpoint, params=params or None)
+
+def download_document_asset(
+    backend: PaperlessBackend,
+    doc_id: int,
+    asset: str,
+    output_dir: str = ".",
+    params: dict[str, Any] | None = None,
+) -> str:
+    """Download a document-related binary asset to a local directory.
+
+    Args:
+        backend: Authenticated PaperlessBackend instance.
+        doc_id: Document primary key.
+        asset: Asset endpoint name, e.g. ``download``, ``preview``, or ``thumb``.
+        output_dir: Local directory to save the file.
+        params: Optional query parameters.
+
+    Returns:
+        The local path where the file was saved.
+    """
+    resp = backend.get_raw(f"documents/{doc_id}/{asset}/", params=params)
 
     # Extract filename from Content-Disposition or fallback
-    filename = f"document_{doc_id}"
+    filename = f"document_{doc_id}_{asset}"
     cd = resp.headers.get("Content-Disposition", "")
     if "filename=" in cd:
         filename = cd.split("filename=")[-1].strip().strip('"')
@@ -143,6 +167,28 @@ def download_document(
         for chunk in resp.iter_content(chunk_size=8192):
             f.write(chunk)
     return output_path
+
+
+def download_document_preview(
+    backend: PaperlessBackend,
+    doc_id: int,
+    output_dir: str = ".",
+) -> str:
+    """Download a document preview image/PDF to a local directory."""
+    return download_document_asset(
+        backend, doc_id, asset="preview", output_dir=output_dir
+    )
+
+
+def download_document_thumbnail(
+    backend: PaperlessBackend,
+    doc_id: int,
+    output_dir: str = ".",
+) -> str:
+    """Download a document thumbnail image to a local directory."""
+    return download_document_asset(
+        backend, doc_id, asset="thumb", output_dir=output_dir
+    )
 
 
 def update_document(

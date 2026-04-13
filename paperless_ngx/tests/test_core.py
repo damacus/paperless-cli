@@ -33,6 +33,9 @@ from paperless_ngx.core.documents import (
     _guess_mime,
     delete_document,
     download_document,
+    download_document_asset,
+    download_document_preview,
+    download_document_thumbnail,
     get_document,
     list_documents,
     search_documents,
@@ -40,13 +43,8 @@ from paperless_ngx.core.documents import (
     upload_document,
 )
 from paperless_ngx.core.session import Session
-from paperless_ngx.core.tags import (
-    create_tag,
-    delete_tag,
-    get_tag,
-    list_tags,
-)
-from paperless_ngx.paperless_ngx_cli import main
+from paperless_ngx.core.tags import create_tag, delete_tag, get_tag, list_tags
+from paperless_ngx.paperless_ngx_cli import _REPL_HELP, _pretty_print, main
 from paperless_ngx.utils.paperless_backend import (
     PaperlessBackend,
     PaperlessConfig,
@@ -610,6 +608,49 @@ class TestDocuments:
         assert "original=true" in url
 
     @resp_lib.activate
+    def test_download_preview_uses_preview_endpoint(self, tmp_path):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/7/preview/",
+            body=b"preview",
+            headers={"Content-Disposition": 'attachment; filename="preview-7.webp"'},
+            status=200,
+        )
+        backend = make_backend()
+        path = download_document_preview(backend, 7, output_dir=str(tmp_path))
+        assert path.endswith("preview-7.webp")
+        assert Path(path).read_bytes() == b"preview"
+
+    @resp_lib.activate
+    def test_download_thumb_fallback_filename(self, tmp_path):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/8/thumb/",
+            body=b"thumb",
+            headers={},
+            status=200,
+        )
+        backend = make_backend()
+        path = download_document_thumbnail(backend, 8, output_dir=str(tmp_path))
+        assert path.endswith("document_8_thumb")
+        assert Path(path).read_bytes() == b"thumb"
+
+    @resp_lib.activate
+    def test_download_document_asset_respects_custom_asset_name(self, tmp_path):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/6/preview/",
+            body=b"asset",
+            headers={},
+            status=200,
+        )
+        backend = make_backend()
+        path = download_document_asset(
+            backend, 6, asset="preview", output_dir=str(tmp_path)
+        )
+        assert path.endswith("document_6_preview")
+
+    @resp_lib.activate
     def test_update_document_title(self):
         resp_lib.add(
             resp_lib.PATCH,
@@ -971,6 +1012,19 @@ class TestProjectCore:
             init_connection(BASE_URL)
 
     @resp_lib.activate
+    def test_init_connection_credential_failure_raises(self):
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"non_field_errors": ["bad creds"]},
+            status=400,
+        )
+        from paperless_ngx.core.project import init_connection
+
+        with pytest.raises(RuntimeError, match="Failed to obtain token"):
+            init_connection(BASE_URL, username="admin", password="wrong")
+
+    @resp_lib.activate
     def test_get_connection_info(self):
         # Use a token long enough to trigger masking (>8 chars)
         save_config(BASE_URL, "longtesttoken123")
@@ -1149,15 +1203,46 @@ class TestCLILayer:
         runner = self._runner()
         result = runner.invoke(main, ["document", "--help"])
         assert result.exit_code == 0
-        for cmd in ("list", "get", "upload", "download", "update", "delete", "search"):
+        for cmd in (
+            "list",
+            "get",
+            "upload",
+            "download",
+            "preview",
+            "thumb",
+            "update",
+            "delete",
+            "search",
+        ):
             assert cmd in result.output
 
     def test_tag_help(self):
         runner = self._runner()
         result = runner.invoke(main, ["tag", "--help"])
         assert result.exit_code == 0
-        for cmd in ("list", "create", "delete"):
+        for cmd in ("list", "get", "create", "delete"):
             assert cmd in result.output
+
+    def test_document_update_help_describes_mutating_flags(self):
+        runner = self._runner()
+        result = runner.invoke(main, ["document", "update", "--help"])
+        assert result.exit_code == 0
+        assert "Tag IDs to set on the document." in result.output
+        assert "existing tag list" in result.output
+        assert "YYYY-MM-DD" in result.output
+
+    def test_export_bulk_help_describes_zip_and_original_flags(self):
+        runner = self._runner()
+        result = runner.invoke(main, ["export", "bulk", "--help"])
+        assert result.exit_code == 0
+        assert "single ZIP" in result.output
+        assert "original files" in result.output
+
+    def test_project_init_help_describes_token_exchange(self):
+        runner = self._runner()
+        result = runner.invoke(main, ["project", "init", "--help"])
+        assert result.exit_code == 0
+        assert "exchange credentials for an API token" in result.output
 
     # ── status without config ──
 
@@ -1320,6 +1405,44 @@ class TestCLILayer:
         assert data["status"] == "ok"
         assert data["doc_id"] == 1
 
+    @resp_lib.activate
+    def test_document_preview_json(self, tmp_path):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/2/preview/",
+            body=b"preview",
+            headers={"Content-Disposition": 'attachment; filename="preview.png"'},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main, ["document", "preview", "2", "--output-dir", str(tmp_path), "--json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["asset"] == "preview"
+        assert data["doc_id"] == 2
+
+    @resp_lib.activate
+    def test_document_thumb_json(self, tmp_path):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/documents/3/thumb/",
+            body=b"thumb",
+            headers={"Content-Disposition": 'attachment; filename="thumb.webp"'},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main, ["document", "thumb", "3", "--output-dir", str(tmp_path), "--json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["asset"] == "thumb"
+        assert data["doc_id"] == 3
+
     # ── tag commands ──
 
     @resp_lib.activate
@@ -1362,6 +1485,21 @@ class TestCLILayer:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "deleted"
+
+    @resp_lib.activate
+    def test_tag_get_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/tags/7/",
+            json={"id": 7, "name": "new-tag"},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["tag", "get", "7", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == 7
 
     # ── correspondent commands ──
 
@@ -1407,6 +1545,21 @@ class TestCLILayer:
         data = json.loads(result.output)
         assert data["status"] == "deleted"
 
+    @resp_lib.activate
+    def test_correspondent_get_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/correspondents/9/",
+            json={"id": 9, "name": "Corp X"},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["correspondent", "get", "9", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == 9
+
     # ── doctype commands ──
 
     @resp_lib.activate
@@ -1449,6 +1602,21 @@ class TestCLILayer:
         data = json.loads(result.output)
         assert data["status"] == "deleted"
 
+    @resp_lib.activate
+    def test_doctype_get_json(self):
+        save_config(BASE_URL, "tok")
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE_URL}/api/document_types/4/",
+            json={"id": 4, "name": "Receipt"},
+            status=200,
+        )
+        runner = self._runner()
+        result = runner.invoke(main, ["doctype", "get", "4", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == 4
+
     # ── project commands ──
 
     @resp_lib.activate
@@ -1488,6 +1656,60 @@ class TestCLILayer:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "ok"
+
+    @resp_lib.activate
+    def test_project_init_with_username_password_json(self):
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"token": "acquired"},
+            status=200,
+        )
+        resp_lib.add(resp_lib.GET, f"{BASE_URL}/api/status/", json={}, status=200)
+        runner = self._runner()
+        result = runner.invoke(
+            main,
+            [
+                "project",
+                "init",
+                "--url",
+                BASE_URL,
+                "--username",
+                "admin",
+                "--password",
+                "secret",
+                "--json",
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "ok"
+
+    @resp_lib.activate
+    def test_project_init_with_username_password_failure(self):
+        resp_lib.add(
+            resp_lib.POST,
+            f"{BASE_URL}/api/token/",
+            json={"non_field_errors": ["bad creds"]},
+            status=400,
+        )
+        runner = self._runner()
+        result = runner.invoke(
+            main,
+            [
+                "project",
+                "init",
+                "--url",
+                BASE_URL,
+                "--username",
+                "admin",
+                "--password",
+                "wrong",
+                "--json",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Failed to obtain token" in result.output
 
     def test_export_bulk_zip_honors_original_flag(self, tmp_path):
         save_config(BASE_URL, "tok")
@@ -1558,4 +1780,43 @@ class TestCLILayer:
         result = runner.invoke(main, ["--json", "document", "list"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert "count" in data
+        assert data["count"] == 0
+
+
+class TestPrettyPrint:
+    def _skin(self):
+        skin = MagicMock()
+        skin.info = MagicMock()
+        skin.table = MagicMock()
+        skin.status = MagicMock()
+        return skin
+
+    def test_pretty_print_empty_list_calls_info(self):
+        skin = self._skin()
+        _pretty_print([], skin)
+        skin.info.assert_called_once_with("No results.")
+
+    def test_pretty_print_list_renders_table(self):
+        skin = self._skin()
+        _pretty_print([{"id": 1, "title": "Doc"}], skin)
+        skin.table.assert_called_once()
+
+    def test_pretty_print_paginated_dict_prints_count_and_results(self):
+        skin = self._skin()
+        _pretty_print({"count": 2, "results": [{"id": 1}, {"id": 2}]}, skin)
+        skin.info.assert_called_once_with("Total: 2 results")
+        skin.table.assert_called_once()
+
+    def test_pretty_print_scalar_dict_uses_status_lines(self):
+        skin = self._skin()
+        _pretty_print({"id": 1, "title": "Doc"}, skin)
+        assert skin.status.call_count == 2
+
+
+class TestReplMetadata:
+    def test_repl_help_covers_new_discoverability_commands(self):
+        assert "document preview <id>" in _REPL_HELP
+        assert "document thumb <id>" in _REPL_HELP
+        assert "tag get <id>" in _REPL_HELP
+        assert "correspondent get <id>" in _REPL_HELP
+        assert "doctype get <id>" in _REPL_HELP

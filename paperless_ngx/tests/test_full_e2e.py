@@ -331,14 +331,24 @@ class TestCLISubprocess:
         """document --help lists all document subcommands."""
         result = _run_cli("document", "--help")
         assert result.returncode == 0
-        for sub in ("list", "get", "upload", "download", "update", "delete", "search"):
+        for sub in (
+            "list",
+            "get",
+            "upload",
+            "download",
+            "preview",
+            "thumb",
+            "update",
+            "delete",
+            "search",
+        ):
             assert sub in result.stdout
 
     def test_tag_help(self):
         """tag --help lists tag subcommands."""
         result = _run_cli("tag", "--help")
         assert result.returncode == 0
-        for sub in ("list", "create", "delete"):
+        for sub in ("list", "get", "create", "delete"):
             assert sub in result.stdout
 
     def test_project_help(self):
