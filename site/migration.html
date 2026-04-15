@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Migration · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="readme.html"><span>README</span><small>commands</small></a></li>
+            <li><a href="architecture.html"><span>Architecture</span><small>layers</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
+            <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">Migration</span>
+          <h1>What moved, and what stayed intentionally familiar</h1>
+          <p class="lede">The repo moved from a Python CLI and REPL to a Rust-first application with a Ratatui interface and explicit Markdown and JSON output modes.</p>
+          <h2>What changed</h2>
+          <ul>
+            <li><code>paperless</code> with no subcommand launches the TUI.</li>
+            <li>Non-interactive commands emit Markdown or structured JSON.</li>
+            <li>The transport layer is a blocking <code>reqwest</code> client behind a testable abstraction.</li>
+            <li>Config moved to TOML, with legacy JSON config still accepted on read.</li>
+            <li>The Python REPL has been replaced by a TUI shell with document list, inspector, status, and security summary.</li>
+          </ul>
+          <h2>Compatibility choices</h2>
+          <ul>
+            <li>Singular command groups like <code>document</code>, <code>tag</code>, and <code>task</code> remain available.</li>
+            <li>Status still degrades gracefully when no config exists.</li>
+            <li>Rust now includes the high-value compatibility commands from the older workflow: <code>document content</code>, <code>document edit</code> tag mutation, <code>tag edit</code>, <code>pdf read/info</code>, and config env-var compatibility.</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

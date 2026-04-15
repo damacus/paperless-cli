@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>README · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="migration.html"><span>Migration</span><small>what changed</small></a></li>
+            <li><a href="architecture.html"><span>Architecture</span><small>system shape</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
+            <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility</small></a></li>
+            <li><a href="skills.html"><span>Skills</span><small>repo-local skills</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">README</span>
+          <h1>Quick start, commands, and compatibility</h1>
+          <p class="lede"><code>paperless-cli</code> is a Rust application for Paperless-ngx with three output modes: <code>tui</code>, <code>markdown</code>, and <code>json</code>.</p>
+          <h2>Install</h2>
+          <pre><code>cargo build --release
+./target/release/paperless --help</code></pre>
+          <h2>Quick start</h2>
+          <pre><code>paperless login --url https://paperless.example.com --token YOUR_TOKEN
+paperless
+paperless --demo
+paperless --output markdown document list --query "invoice 2024"
+paperless --output json search query "invoice acme"</code></pre>
+          <h2>TUI and demo mode</h2>
+          <p>The default interface is a two-pane TUI with a scrolling document list on the left and a text inspector on the right. Use <code>Tab</code> to switch focus between panes, <code>j/k</code> or the arrow keys to move, <code>PgUp/PgDn</code> to page, <code>g/G</code> to jump, and <code>r</code> to reload.</p>
+          <p>For quick design and interaction feedback, run <code>paperless --demo</code>. Demo mode avoids real Paperless data and serves a built-in generic fixture dataset to both the CLI and the TUI.</p>
+          <figure class="shot">
+            <img src="assets/demo-tui.png" alt="paperless-cli demo mode showing the documents list, inspector pane, and status area">
+            <figcaption>The current demo-mode TUI: paginated document list, text-first inspector, and low-priority status metadata at the bottom.</figcaption>
+          </figure>
+          <h2>Command surface</h2>
+          <ul>
+            <li><code>config</code>: <code>set-url</code>, <code>set-token</code></li>
+            <li><code>pdf</code>: <code>read</code>, <code>info</code></li>
+            <li><code>project</code>: <code>login</code>, <code>info</code>, <code>ping</code></li>
+            <li><code>document</code>: <code>list</code>, <code>get</code>, <code>content</code>, <code>upload</code>, <code>download</code>, <code>preview</code>, <code>thumb</code>, <code>edit</code>, <code>update</code>, <code>delete</code>, <code>search</code></li>
+            <li><code>tag</code>: <code>list</code>, <code>get</code>, <code>create</code>, <code>edit</code>, <code>delete</code></li>
+          </ul>
+          <h2>Compatibility</h2>
+          <ul>
+            <li><code>document content &lt;id&gt;</code> returns extracted text only.</li>
+            <li><code>document edit &lt;id&gt; --add-tag ... --remove-tag ...</code> accepts exact tag names or IDs.</li>
+            <li><code>PAPERLESS_URL</code> and <code>PAPERLESS_TOKEN</code> are supported.</li>
+            <li>Global compatibility flags include <code>--json</code>, <code>-q/--quiet</code>, <code>--no-color</code>, and <code>-u/--url</code>.</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

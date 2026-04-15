@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CLI parity · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="readme.html"><span>README</span><small>surface</small></a></li>
+            <li><a href="migration.html"><span>Migration</span><small>history</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">CLI parity</span>
+          <h1>Compatibility-focused commands carried by the Rust CLI</h1>
+          <p class="lede">These are the commands and flags shaped to feel familiar to users coming from earlier Paperless CLI workflows.</p>
+          <h2>Implemented</h2>
+          <ul>
+            <li><code>document content</code></li>
+            <li>Incremental document tag edits through <code>document edit</code></li>
+            <li><code>tag edit</code></li>
+            <li><code>pdf read</code> and <code>pdf info</code></li>
+            <li><code>config set-url</code> and <code>config set-token</code></li>
+            <li><code>PAPERLESS_URL</code> and <code>PAPERLESS_TOKEN</code></li>
+            <li>Global <code>--json</code>, <code>-q/--quiet</code>, <code>--no-color</code>, and <code>-u/--url</code></li>
+          </ul>
+          <h2>Examples</h2>
+          <pre><code>paperless document content 303
+paperless document edit 303 --add-tag important --remove-tag TODO
+paperless tag edit 12 --name receipts
+paperless pdf read ./invoice.pdf
+paperless config set-url https://paperless.example.com</code></pre>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
