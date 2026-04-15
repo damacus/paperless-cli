@@ -62,7 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
+
         with:
           path: artifacts
 
