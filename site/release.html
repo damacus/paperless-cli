@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Release process · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="readme.html"><span>README</span><small>quick start</small></a></li>
+            <li><a href="migration.html"><span>Migration</span><small>what changed</small></a></li>
+            <li><a href="architecture.html"><span>Architecture</span><small>system shape</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
+            <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility</small></a></li>
+            <li><a href="skills.html"><span>Skills</span><small>repo-local skills</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">Release process</span>
+          <h1>GitHub releases and crates.io publish</h1>
+          <p class="lede"><code>paperless-cli</code> now follows the same release shape as <code>damacus/zitadel-tui</code>, adapted for this crate and repository layout.</p>
+
+          <h2>What happens on <code>main</code></h2>
+          <ol>
+            <li><code>release-please</code> updates the release PR, tags, and changelog.</li>
+            <li>The tagged revision is checked out after a release is created.</li>
+            <li>The Linux binary is built and packaged as <code>paperless-linux-amd64.tar.gz</code>.</li>
+            <li><code>checksums-sha256.txt</code> is generated for the packaged artifacts.</li>
+            <li>The tarball and checksum file are attached to the GitHub release.</li>
+            <li>The crate is published to crates.io with <code>cargo publish</code>.</li>
+          </ol>
+
+          <h2>Required secrets</h2>
+          <ul>
+            <li><code>GITHUB_TOKEN</code>: used by release-please and release asset upload steps.</li>
+            <li><code>CARGO_REGISTRY_TOKEN</code>: required for the crates.io publish step.</li>
+          </ul>
+
+          <h2>Required crate metadata</h2>
+          <p>The crate metadata now includes <code>description</code>, <code>license</code>, <code>repository</code>, <code>homepage</code>, <code>readme</code>, <code>keywords</code>, and <code>categories</code> so the first publish can succeed cleanly.</p>
+
+          <div class="callout">
+            This page is intentionally new so the first Rust release has an explicit, visible release-process document in the tree.
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

@@ -5,6 +5,10 @@ edition = "2021"
 description = "Rust TUI and LLM-friendly client for Paperless-ngx"
 license = "MIT"
 repository = "https://github.com/damacus/paperless-cli"
+homepage = "https://github.com/damacus/paperless-cli"
+readme = "README.md"
+keywords = ["paperless", "paperless-ngx", "tui", "cli", "documents"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "paperless"

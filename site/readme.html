@@ -17,6 +17,7 @@
             <li><a href="architecture.html"><span>Architecture</span><small>system shape</small></a></li>
             <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
             <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility</small></a></li>
+            <li><a href="release.html"><span>Release process</span><small>publishing flow</small></a></li>
             <li><a href="skills.html"><span>Skills</span><small>repo-local skills</small></a></li>
           </ul>
         </aside>
@@ -55,6 +56,8 @@ paperless --output json search query "invoice acme"</code></pre>
             <li><code>PAPERLESS_URL</code> and <code>PAPERLESS_TOKEN</code> are supported.</li>
             <li>Global compatibility flags include <code>--json</code>, <code>-q/--quiet</code>, <code>--no-color</code>, and <code>-u/--url</code>.</li>
           </ul>
+          <h2>Release flow</h2>
+          <p>The release workflow now matches the shape used in <code>damacus/zitadel-tui</code>: release-please manages tags and changelog updates, packaged tarballs and checksums are attached to GitHub releases, and successful releases publish the crate to crates.io.</p>
         </article>
       </section>
     </main>
