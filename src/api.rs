@@ -359,16 +359,19 @@ fn validate_next_page_url(current_url: &str, next_url: &str) -> Result<String, A
         )));
     }
 
-    if let (Some(current_port), Some(next_port)) = (current.port(), next.port()) {
-        if current_port != next_port {
+    if current.scheme() == next.scheme() {
+        if current.port_or_known_default() != next.port_or_known_default() {
             return Err(AppError::Message(format!(
                 "Refusing cross-origin pagination link: {next_url}"
             )));
         }
+        return Ok(next_url.to_string());
     }
 
-    if current.scheme() == next.scheme() {
-        return Ok(next_url.to_string());
+    if next.port().is_some() && current.port_or_known_default() != next.port_or_known_default() {
+        return Err(AppError::Message(format!(
+            "Refusing cross-origin pagination link: {next_url}"
+        )));
     }
 
     let mut normalized = current;

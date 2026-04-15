@@ -147,3 +147,15 @@ fn security_reviewer_uses_gpt_54_and_polls_findings() {
     let cleaned = receiver.recv_timeout(Duration::from_millis(50)).unwrap();
     assert!(cleaned.is_empty());
 }
+
+#[test]
+fn security_reviewer_allows_ipv6_loopback_http() {
+    let profile = SecurityAgentProfile::security_reviewer();
+    let findings = SecurityAuditor::new(profile, Duration::from_millis(10)).review_once(
+        &AuditState::new(Some("http://[::1]:8000".to_string()), true, None),
+    );
+
+    assert!(findings
+        .iter()
+        .all(|finding| !finding.title.contains("plain HTTP")));
+}

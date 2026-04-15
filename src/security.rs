@@ -137,7 +137,11 @@ fn review_state(profile: &SecurityAgentProfile, state: &AuditState) -> Vec<Secur
     }
 
     if let Some(url) = &state.base_url {
-        if url.starts_with("http://") && !url.contains("127.0.0.1") && !url.contains("localhost") {
+        if url.starts_with("http://")
+            && !url.contains("127.0.0.1")
+            && !url.contains("localhost")
+            && !url.contains("[::1]")
+        {
             findings.push(SecurityFinding {
                 severity: Severity::Medium,
                 title: "Paperless API is using plain HTTP".to_string(),

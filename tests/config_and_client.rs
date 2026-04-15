@@ -100,6 +100,18 @@ fn config_roundtrip_redacts_token_and_persists_session() {
 }
 
 #[test]
+fn masked_token_handles_multibyte_prefixes_without_panicking() {
+    let config = AppConfig::new(
+        "https://paperless.example.com/",
+        "秘密令牌🙂abcdef",
+        OutputMode::Markdown,
+    )
+    .unwrap();
+
+    assert_eq!(config.masked_token(), "秘密令牌🙂abc...")
+}
+
+#[test]
 fn load_config_allows_env_only_and_env_override() {
     let _env_lock = ENV_LOCK.lock().unwrap();
     let temp = tempdir().unwrap();
@@ -215,6 +227,27 @@ fn client_rejects_cross_origin_pagination_links() {
         json!({
             "count": 2,
             "next": "https://evil.example.net/api/tags/?page=2",
+            "results": [{"id": 1}],
+        }),
+    );
+
+    let client = ApiClient::new(transport);
+    let error = client.paginate("tags/", Vec::new()).unwrap_err();
+    match error {
+        AppError::Message(message) => assert!(message.contains("cross-origin pagination")),
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn client_rejects_same_host_pagination_links_with_different_ports() {
+    let transport = MockTransport::default();
+    transport.push_json(
+        200,
+        "https://paperless.example.com/api/tags/",
+        json!({
+            "count": 2,
+            "next": "https://paperless.example.com:8443/api/tags/?page=2",
             "results": [{"id": 1}],
         }),
     );

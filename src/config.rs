@@ -62,11 +62,13 @@ impl AppConfig {
     }
 
     pub fn masked_token(&self) -> String {
-        if self.token.len() <= 8 {
+        let total_chars = self.token.chars().count();
+        if total_chars <= 8 {
             return "***".to_string();
         }
 
-        format!("{}...", &self.token[..8])
+        let prefix = self.token.chars().take(8).collect::<String>();
+        format!("{prefix}...")
     }
 }
 
