@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <article class="card hero-card">
+          <span class="eyebrow">paperless-cli documentation</span>
+          <h1>A calm map of a sharp Rust CLI.</h1>
+          <p>
+            This site gathers the current repo docs into one quiet surface: how the
+            Rust migration landed, how the CLI is shaped, how testing and parity work,
+            and where the shipped skills fit.
+          </p>
+          <div class="hero-grid">
+            <div class="mini">
+              <strong>Runtime</strong>
+              <span>Rust-first CLI, TUI, JSON, Markdown, and a built-in demo mode.</span>
+            </div>
+            <div class="mini">
+              <strong>Compatibility</strong>
+              <span>Config, PDF helpers, and parity commands live in one documented surface.</span>
+            </div>
+            <div class="mini">
+              <strong>Security</strong>
+              <span>Restricted config writes, sanitized downloads, and a polling reviewer.</span>
+            </div>
+            <div class="mini">
+              <strong>Skills</strong>
+              <span>Repo-local skills ship alongside the binary and docs.</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="nav">
+          <h2>Doc routes</h2>
+          <ul>
+            <li><a href="readme.html"><span>README / Quick start</span><small>install + commands</small></a></li>
+            <li><a href="migration.html"><span>Rust migration</span><small>what changed</small></a></li>
+            <li><a href="architecture.html"><span>Architecture</span><small>service split + TUI shape</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage and contracts</small></a></li>
+            <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility notes</small></a></li>
+            <li><a href="skills.html"><span>Skills</span><small>repo-local agents</small></a></li>
+          </ul>
+        </aside>
+      </section>
+
+      <section class="grid">
+        <aside class="stack">
+          <div class="card stat">
+            <strong>Primary binary</strong>
+            <span><code>paperless</code></span>
+          </div>
+          <div class="card stat">
+            <strong>Primary docs</strong>
+            <span><code>README.md</code>, <code>MIGRATION.md</code>, and <code>docs/</code></span>
+          </div>
+          <div class="card stat">
+            <strong>Built for</strong>
+            <span>Paperless-ngx operators, shell users, and agent workflows.</span>
+          </div>
+        </aside>
+
+        <article class="doc">
+          <p class="lede">
+            The repo now has enough surface area that raw Markdown files feel scattered.
+            This site is the calmer reading view: one landing page, one page per current
+            doc, and a short path into the commands and skills that matter most.
+          </p>
+
+          <div class="callout">
+            Open this site directly from the repo at <code>site/index.html</code>.
+          </div>
+
+          <h2>What is here</h2>
+          <div class="route-list">
+            <a href="readme.html">
+              <strong>README</strong>
+              <span>The operational front door: install, commands, compatibility, and skills.</span>
+            </a>
+            <a href="migration.html">
+              <strong>Migration notes</strong>
+              <span>Why the repo moved to Rust and what stayed intentionally compatible.</span>
+            </a>
+            <a href="architecture.html">
+              <strong>Architecture</strong>
+              <span>Config, API, services, TUI, render, and security as separate layers.</span>
+            </a>
+            <a href="testing.html">
+              <strong>Testing</strong>
+              <span>What is covered, why the transport abstraction matters, and how to extend it.</span>
+            </a>
+            <a href="cli-parity.html">
+              <strong>CLI parity</strong>
+              <span>The compatibility-facing commands and flags carried by the Rust CLI.</span>
+            </a>
+            <a href="skills.html">
+              <strong>Skills</strong>
+              <span>Repo-local skills for Paperless documents, local PDFs, and admin flows.</span>
+            </a>
+          </div>
+
+          <h2>Current posture</h2>
+          <ul>
+            <li>The Rust binary is the default runtime and release target.</li>
+            <li>The TUI is the default interactive surface, with Markdown and JSON for non-interactive use.</li>
+            <li><code>--demo</code> runs both the TUI and CLI against generic built-in fixtures for fast feedback cycles.</li>
+            <li>Compatibility features such as <code>document content</code>, <code>tag edit</code>, <code>pdf read</code>, and env-var config support are part of the documented surface.</li>
+            <li>Repo-local skills ship with the source tree so the tool can be used as both a CLI and an agent-facing capability bundle.</li>
+          </ul>
+        </article>
+      </section>
+
+      <p class="footer">paperless-cli docs site · static, local, and intentionally low-friction</p>
+    </main>
+  </body>
+</html>

@@ -1,183 +1,136 @@
-# paperless-ngx-cli
+# paperless-cli
 
-A command-line client and REPL for
-[Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx).
+`paperless-cli` is now a Rust application with three output modes for
+[Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx):
 
-This project intentionally supports a curated subset of the Paperless REST API.
-It focuses on common document workflows, lightweight taxonomy management, and
-script-friendly JSON output. It does not aim for full Paperless API parity.
+- `tui`: interactive Ratatui dashboard and inspector
+- `markdown`: LLM-friendly summaries for humans and agents
+- `json`: structured machine-readable output
 
-## Installation
+The Rust binary is now the primary runtime and CI target.
+
+## Install
 
 ```bash
-pip install paperless-ngx-cli
+cargo build --release
+./target/release/paperless --help
 ```
 
-## Quick Start
+## Quick start
 
-Configure the server connection with an existing token:
+Configure access with a token:
 
 ```bash
-paperless project init --url http://localhost:8000 --token YOUR_TOKEN
+paperless login --url https://paperless.example.com --token YOUR_TOKEN
 ```
 
-Or exchange username/password for a token and save it locally:
+Or exchange username and password for a token:
 
 ```bash
-paperless project init --url http://localhost:8000 --username admin --password secret
+paperless login --url https://paperless.example.com --username admin --password secret
 ```
 
-Verify connectivity:
+If you omit the URL or auth fields, `paperless login` will prompt for them interactively.
+
+Launch the TUI:
 
 ```bash
-paperless project ping
-paperless project info
+paperless
+```
+
+Launch the built-in demo mode for fast UI feedback without a live Paperless
+server or local config:
+
+```bash
+paperless --demo
+paperless --demo document list
+paperless --demo --output json status
+```
+
+Request markdown or JSON output:
+
+```bash
+paperless --output markdown document list --query "invoice 2024"
+paperless --output json search query "invoice acme"
 paperless status
 ```
 
-Common commands:
+## TUI overview
 
-```bash
-paperless document list --query "invoice 2024"
-paperless document list --tag-id 7 --created-after 2024-01-01 --order-by title
-paperless document get 42
-paperless document upload ~/Downloads/invoice.pdf --title "Invoice Q1"
-paperless document download 42 --output-dir ~/Downloads
-paperless document preview 42 --output-dir ~/Downloads
-paperless search query "invoice acme"
-paperless search autocomplete inv
-paperless task list
-paperless tag get 7
-paperless --json document list
-paperless repl
-```
+The default TUI is a two-pane document browser:
 
-## Supported Commands
+- `Tab` switches focus between the Documents list and the Inspector
+- `j/k` or arrows move within the focused pane
+- `PgUp/PgDn` page through the focused pane
+- `g/G` jump to the top or bottom of the focused pane
+- `r` reloads the document list
 
-| Group | Commands |
+For fast iteration on layout and keyboard behavior, use `paperless --demo`.
+
+![paperless-cli TUI demo](site/assets/demo-tui.png)
+
+## Command surface
+
+| Area | Commands |
 | --- | --- |
-| `project` | `init`, `info`, `ping` |
-| `document` | `list`, `get`, `upload`, `download`, `preview`, `thumb`, `update`, `delete`, `search` |
+| top level | `login`, `status`, default TUI |
+| `config` | `set-url`, `set-token` |
+| `pdf` | `read`, `info` |
+| `project` | `login`, `info`, `ping` |
+| `document` | `list`, `get`, `content`, `upload`, `download`, `preview`, `thumb`, `edit`, `update`, `delete`, `search` |
 | `search` | `query`, `autocomplete` |
-| `tag` | `list`, `get`, `create`, `delete` |
+| `task` | `list`, `get` |
+| `tag` | `list`, `get`, `create`, `edit`, `delete` |
 | `correspondent` | `list`, `get`, `create`, `delete` |
 | `doctype` | `list`, `get`, `create`, `delete` |
-| `task` | `list`, `get` |
 | `export` | `bulk` |
-| top-level | `status`, `repl` |
 
-## Capabilities And Limits
+## Compatibility
 
-Implemented Paperless endpoint coverage:
+The CLI now includes the main compatibility commands and inputs people expect
+from [`julianfbeck/paperless-cli`](https://github.com/julianfbeck/paperless-cli):
 
-| CLI command | Paperless endpoint |
-| --- | --- |
-| `project ping` | `GET /api/status/` |
-| `project info` | `GET /api/statistics/` |
-| `document list`, `document search` | `GET /api/documents/` |
-| `search query` | `GET /api/search/` |
-| `search autocomplete` | `GET /api/search/autocomplete/` |
-| `document get` | `GET /api/documents/<id>/` |
-| `document upload` | `POST /api/documents/post_document/` |
-| `document download` | `GET /api/documents/<id>/download/` |
-| `document preview` | `GET /api/documents/<id>/preview/` |
-| `document thumb` | `GET /api/documents/<id>/thumb/` |
-| `document update` | `PATCH /api/documents/<id>/` |
-| `document delete` | `DELETE /api/documents/<id>/` |
-| `task *` | `/api/tasks/` |
-| `tag *` | `/api/tags/` |
-| `correspondent *` | `/api/correspondents/` |
-| `doctype *` | `/api/document_types/` |
-| `export bulk --zip` | `POST /api/documents/bulk_download/` |
+- `document content <id>` for extracted text only
+- `document edit <id> --add-tag ... --remove-tag ...` with exact tag names or IDs
+- `tag edit <id> --name ...`
+- `pdf read <file>` and `pdf info <file>`
+- `config set-url ...` and `config set-token ...`
+- `PAPERLESS_URL` and `PAPERLESS_TOKEN` support
+- global `--json`, `-q/--quiet`, `--no-color`, and `-u/--url` compatibility flags
 
-Not implemented yet:
+See [docs/cli-parity.md](docs/cli-parity.md) for the current compatibility notes.
 
-- `documents/bulk_edit`
-- `documents/reprocess`
-- saved views, storage paths, users, groups
-- mail accounts, mail rules, custom fields, config
+## Security posture
 
-## Search Modes
+- Config and session state are stored as TOML under the user config/state
+  directories with restricted permissions on Unix.
+- Downloaded filenames are sanitized before writing to disk.
+- A background security reviewer polls shared runtime state and feeds findings
+  back to the main app. Its default model profile is `gpt-5.4`.
+- The app avoids shelling out for Paperless operations; all API calls go
+  through the Rust client.
 
-There are now two search entry points:
+## Docs
 
-- `paperless document search`
-  Searches only documents via `/api/documents/` and supports document filters
-  like tag IDs, correspondent IDs, date ranges, and ordering.
-- `paperless search query`
-  Uses Paperless global search via `/api/search/` and can return matches across
-  indexed resource types.
-- `paperless search autocomplete`
-  Returns term suggestions from `/api/search/autocomplete/` for partial input.
+- [Migration notes](docs/rust-migration.md)
+- [Architecture overview](docs/architecture.md)
+- [Testing strategy](docs/testing-strategy.md)
+- [CLI parity notes](docs/cli-parity.md)
+- [Static docs site](site/index.html)
 
-Useful document filter examples:
+## Skills
 
-```bash
-paperless document list --tag urgent --order-by -created
-paperless document list --tag-id 4 --correspondent-id 2 --created-before 2024-12-31
-paperless document search "contract" --type-id 3 --order-by title
-```
+This repo now ships installable repo-local skills:
 
-## REPL And Session Behavior
-
-Running `paperless` without a subcommand enters the REPL.
-
-The REPL stores lightweight session state in a temporary file:
-
-- `last_query`: most recent document search/list query
-- `selected_docs`: reserved for future selection-aware workflows
-- `history`: recent commands entered during the session
-
-Configuration is stored at `~/.config/paperless-cli/config.json`.
-Session state is stored at `/tmp/paperless-cli-session.json`.
-
-Every command also supports `--json` for scripting. JSON mode prints raw
-response structures instead of the human-oriented table/status output used in
-the REPL and standard CLI mode.
+- [SKILL.md](SKILL.md)
+- [skills/paperless-documents/SKILL.md](skills/paperless-documents/SKILL.md)
+- [skills/paperless-pdf/SKILL.md](skills/paperless-pdf/SKILL.md)
+- [skills/paperless-admin/SKILL.md](skills/paperless-admin/SKILL.md)
 
 ## Development
 
-Run the test suite from the project virtualenv:
-
 ```bash
-./.venv/bin/pytest
+cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 ```
-
-Useful local checks:
-
-```bash
-./.venv/bin/ruff check .
-./.venv/bin/mypy paperless_ngx
-./.venv/bin/pylint paperless_ngx
-```
-
-The GitHub Actions pipeline runs:
-
-- `pytest`
-- `ruff check`
-- `ruff format --check`
-- `mypy`
-- `pylint`
-- `bandit`
-- `python -m compileall`
-- `python -m build`
-- `twine check`
-
-## Releases
-
-Releases are managed with `googleapis/release-please-action` from
-`.github/workflows/release-please.yml`. When a release PR is merged, the
-workflow builds the package and publishes it to PyPI using trusted publishing.
-
-### PyPI Pending Publisher
-
-Create a pending publisher for project `paperless-ngx-cli` at
-[PyPI publishing settings](https://pypi.org/manage/account/publishing/) with:
-
-- Owner: `damacus`
-- Repository name: `paperless-cli`
-- Workflow filename: `release-please.yml`
-- Environment name: `pypi`
-
-After the pending publisher is saved, releases from the `main` branch can
-publish without a PyPI API token.

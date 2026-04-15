@@ -1,0 +1,32 @@
+[package]
+name = "paperless-cli"
+version = "2.0.0"
+edition = "2021"
+description = "Rust TUI and LLM-friendly client for Paperless-ngx"
+license = "MIT"
+repository = "https://github.com/damacus/paperless-cli"
+
+[[bin]]
+name = "paperless"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.38", features = ["derive"] }
+crossterm = "0.28.1"
+dirs = "6.0.0"
+mime_guess = "2.0.5"
+lopdf = "0.38.0"
+ratatui = "0.29.0"
+reqwest = { version = "0.12.15", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
+rpassword = "7.3.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.12"
+toml = "0.8.20"
+url = "2.5.4"
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+httpmock = "0.7.0"
+predicates = "3.1.3"
+tempfile = "3.19.1"

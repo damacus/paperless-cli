@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Architecture · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="readme.html"><span>README</span><small>surface</small></a></li>
+            <li><a href="migration.html"><span>Migration</span><small>history</small></a></li>
+            <li><a href="testing.html"><span>Testing</span><small>coverage</small></a></li>
+            <li><a href="skills.html"><span>Skills</span><small>agent bundle</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">Architecture</span>
+          <h1>Service layers first, TUI second</h1>
+          <p class="lede">The Rust application follows an orchestrated-state pattern: config and transport live below the service layer, and the TUI renders state instead of owning business logic.</p>
+          <h2>System shape</h2>
+          <ol>
+            <li><code>config</code>: durable configuration, session persistence, output selection</li>
+            <li><code>api</code>: transport abstraction, request construction, error mapping</li>
+            <li><code>services</code>: Paperless workflows as domain operations</li>
+            <li><code>security</code>: a continuously polling reviewer feeding findings back to the app</li>
+            <li><code>tui</code>: Ratatui layout that renders state</li>
+            <li><code>render</code>: Markdown and JSON emitters for non-interactive use</li>
+          </ol>
+          <h2>Compatibility placement</h2>
+          <p>Compatibility commands such as <code>document content</code>, <code>tag edit</code>, <code>config set-url</code>, and <code>pdf read/info</code> stay thin adapters over the same config and service foundations rather than forming a second architecture.</p>
+          <h2>Output modes</h2>
+          <ul>
+            <li><strong>TUI</strong>: default interactive mode, with document list, inspector, latest task, and security state.</li>
+            <li><strong>Markdown</strong>: text-first commands return plain extracted text; structured responses render as tables or summaries.</li>
+            <li><strong>JSON</strong>: <code>OutputEnvelope</code> with <code>mode</code>, <code>command</code>, <code>data</code>, and <code>security</code>.</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

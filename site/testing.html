@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Testing · paperless-cli docs</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="grid">
+        <aside class="nav">
+          <h2>Navigate</h2>
+          <ul>
+            <li><a href="index.html"><span>Docs home</span><small>overview</small></a></li>
+            <li><a href="readme.html"><span>README</span><small>surface</small></a></li>
+            <li><a href="architecture.html"><span>Architecture</span><small>layers</small></a></li>
+            <li><a href="cli-parity.html"><span>CLI parity</span><small>compatibility</small></a></li>
+          </ul>
+        </aside>
+        <article class="doc">
+          <span class="eyebrow">Testing</span>
+          <h1>Coverage aimed at behavior, not ceremony</h1>
+          <p class="lede">The suite is organized around the contracts most likely to regress: transport shaping, config behavior, output guarantees, TUI rendering, and local PDF utilities.</p>
+          <h2>Test layers</h2>
+          <ul>
+            <li>Config and client: round-trips, redaction, query parameters, HTTP mapping, pagination, uploads, downloads</li>
+            <li>Output and TUI: Markdown shape, JSON envelope shape, TUI rendering, security reviewer behavior</li>
+            <li>CLI behavior: help surface, missing-config paths, graceful status, config set-url/set-token, document content, and pdf read/info</li>
+          </ul>
+          <h2>Compatibility coverage</h2>
+          <ul>
+            <li><code>document content</code> returns only extracted text in the happy path.</li>
+            <li>Document metadata edits add and remove tags without disturbing unrelated fields.</li>
+            <li><code>tag edit</code> request shaping stays narrow and predictable.</li>
+            <li><code>PAPERLESS_URL</code> and <code>PAPERLESS_TOKEN</code> override persisted config correctly.</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

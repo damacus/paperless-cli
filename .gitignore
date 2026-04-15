@@ -10,3 +10,7 @@ build/
 *.egg-info/
 agent-harness/
 .claude/
+target/
+target/
+Cargo.lock
+target/
