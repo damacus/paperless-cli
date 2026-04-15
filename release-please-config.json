@@ -4,6 +4,7 @@
     ".": {
       "release-type": "rust",
       "package-name": "paperless-cli",
+      "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "include-v-in-tag": true
     }

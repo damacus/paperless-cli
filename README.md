@@ -116,6 +116,7 @@ See [docs/cli-parity.md](docs/cli-parity.md) for the current compatibility notes
 - [Architecture overview](docs/architecture.md)
 - [Testing strategy](docs/testing-strategy.md)
 - [CLI parity notes](docs/cli-parity.md)
+- [Release process](docs/release-process.md)
 - [Static docs site](site/index.html)
 
 ## Skills
