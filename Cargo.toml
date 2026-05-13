@@ -20,7 +20,7 @@ crossterm = "0.28.1"
 dirs = "6.0.0"
 mime_guess = "2.0.5"
 lopdf = "0.38.0"
-ratatui = "0.29.0"
+ratatui = "0.30.0"
 reqwest = { version = "0.12.15", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
 rpassword = "7.3.1"
 serde = { version = "1.0.219", features = ["derive"] }
