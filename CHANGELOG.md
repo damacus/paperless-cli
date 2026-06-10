@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.1](https://github.com/damacus/paperless-cli/compare/v2.1.0...v2.1.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate crossterm to 0.29.0 ([#7](https://github.com/damacus/paperless-cli/issues/7)) ([c3d689f](https://github.com/damacus/paperless-cli/commit/c3d689f33bfac5128b3ea19fa0f15fea15bdb8ee))
+* **deps:** update rust crate lopdf to 0.40.0 ([#8](https://github.com/damacus/paperless-cli/issues/8)) ([8ab2ea0](https://github.com/damacus/paperless-cli/commit/8ab2ea060e8c1d87e0419892fca67cf8ebcd8f61))
+* **deps:** update rust crate lopdf to 0.41.0 ([#19](https://github.com/damacus/paperless-cli/issues/19)) ([10ff300](https://github.com/damacus/paperless-cli/commit/10ff30057b644ee12949b8932c11bf4517ddad91))
+* **deps:** update rust crate toml to v1 ([#15](https://github.com/damacus/paperless-cli/issues/15)) ([72635f8](https://github.com/damacus/paperless-cli/commit/72635f85f3cf52eccedda621b32abb8ae27e5dca))
+
 ## [2.1.0](https://github.com/damacus/paperless-cli/compare/v2.0.0...v2.1.0) (2026-04-15)
 
 
