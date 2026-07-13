@@ -444,7 +444,9 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
             }
         }
 
-        terminal.draw(|frame| draw(frame, app))?;
+        terminal
+            .draw(|frame| draw(frame, app))
+            .map_err(|error| AppError::Message(error.to_string()))?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
