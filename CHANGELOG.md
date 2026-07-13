@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.2](https://github.com/damacus/paperless-cli/compare/v2.1.1...v2.1.2) (2026-07-13)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate lopdf to 0.42.0 ([#21](https://github.com/damacus/paperless-cli/issues/21)) ([48fbaa5](https://github.com/damacus/paperless-cli/commit/48fbaa5cc2998607d3587d7258823fbe46073548))
+* **deps:** update rust crate lopdf to 0.44.0 ([#23](https://github.com/damacus/paperless-cli/issues/23)) ([28fcfe3](https://github.com/damacus/paperless-cli/commit/28fcfe3aaaf6a581571c1a5c7634eeeb0de23032))
+* prevent temp symlink config overwrite ([#24](https://github.com/damacus/paperless-cli/issues/24)) ([2d1be96](https://github.com/damacus/paperless-cli/commit/2d1be9645eddf99e094a77bb9df273b4a8b86971))
+
 ## [2.1.1](https://github.com/damacus/paperless-cli/compare/v2.1.0...v2.1.1) (2026-06-10)
 
 
