@@ -24,7 +24,6 @@
 * align release workflow with crate publish ([#2](https://github.com/damacus/paperless-cli/issues/2)) ([a1ed15c](https://github.com/damacus/paperless-cli/commit/a1ed15c3e9ffb32832510f9523bba2e9edd3e0a7))
 
 ## Changelog
-
 All notable changes to this project will be documented in this file.
 
 This file is managed by release-please.

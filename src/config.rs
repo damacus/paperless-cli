@@ -216,7 +216,7 @@ pub fn save_session(paths: &AppPaths, session: &SessionState) -> Result<(), AppE
 fn write_private_atomic(path: &Path, contents: &str) -> Result<(), AppError> {
     let temp_path = path.with_extension("tmp");
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
 
     #[cfg(unix)]
     {
