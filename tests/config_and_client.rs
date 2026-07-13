@@ -99,6 +99,29 @@ fn config_roundtrip_redacts_token_and_persists_session() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn config_save_rejects_preexisting_temp_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempdir().unwrap();
+    let target = temp.path().join("target.txt");
+    let config_path = temp.path().join("config.toml");
+    std::fs::write(&target, b"keep this file").unwrap();
+    symlink(&target, config_path.with_extension("tmp")).unwrap();
+
+    let config = AppConfig::new(
+        "https://paperless.example.com",
+        "super-secret-token",
+        OutputMode::Markdown,
+    )
+    .unwrap();
+    let paths = AppPaths::new(&config_path, temp.path().join("session.toml"));
+
+    assert!(save_config(&paths, &config).is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"keep this file");
+}
+
 #[test]
 fn masked_token_handles_multibyte_prefixes_without_panicking() {
     let config = AppConfig::new(
