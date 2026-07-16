@@ -24,25 +24,359 @@ pub fn render_markdown(envelope: &OutputEnvelope) -> String {
         }
     }
 
-    let mut lines = Vec::new();
-    render_value_as_markdown(&mut lines, &envelope.data, 0);
+    let mut lines = if envelope.command == "status" {
+        render_status_terminal(&envelope.data).unwrap_or_else(|| {
+            let mut lines = Vec::new();
+            render_value_as_markdown(&mut lines, &envelope.data, 0);
+            lines
+        })
+    } else {
+        let mut lines = Vec::new();
+        render_value_as_markdown(&mut lines, &envelope.data, 0);
+        lines
+    };
 
     if !envelope.security.is_empty() {
         lines.push(String::new());
-        lines.push("## Security".to_string());
-        lines.push(String::new());
+        lines.push("SECURITY".to_string());
+        lines.push("--------".to_string());
         for finding in &envelope.security {
             lines.push(format!(
-                "- `{}` {}: {}",
+                "{:<8} {}: {}",
                 severity_label(finding.severity.as_ref()),
                 finding.title,
                 finding.detail
             ));
-            lines.push(format!("  Remediation: {}", finding.remediation));
+            lines.push(format!("         Remediation: {}", finding.remediation));
         }
     }
 
     lines.join("\n")
+}
+
+fn render_status_terminal(data: &Value) -> Option<Vec<String>> {
+    let status = data.as_object()?;
+    let mut lines = vec![
+        " ____   _    ____  _____ ____  _     _____ ____ ____".to_string(),
+        "|  _ \\ / \\  |  _ \\| ____|  _ \\| |   | ____/ ___/ ___|".to_string(),
+        "| |_) / _ \\ | |_) |  _| | |_) | |   |  _| \\___ \\___ \\".to_string(),
+        "|  __/ ___ \\|  __/| |___|  _ <| |___| |___ ___) |__) |".to_string(),
+        "|_| /_/   \\_\\_|   |_____|_| \\_\\_____|_____|____/____/".to_string(),
+        String::new(),
+    ];
+
+    let Some(response) = status.get("response").and_then(Value::as_object) else {
+        if status.get("connected").and_then(Value::as_bool) == Some(false) {
+            lines.push("Status  NOT CONFIGURED".to_string());
+            if let Some(message) = status.get("message").and_then(Value::as_str) {
+                lines.push(format!("Action  {}", message.replace('`', "")));
+            }
+            return Some(lines);
+        }
+        return None;
+    };
+
+    let mut identity = Vec::new();
+    if let Some(version) = response
+        .get("pngx_version")
+        .or_else(|| response.get("version"))
+        .and_then(Value::as_str)
+    {
+        identity.push(format!("Paperless-ngx {version}"));
+    }
+    if let Some(install_type) = response.get("install_type").and_then(Value::as_str) {
+        identity.push(display_name(install_type));
+    }
+    if !identity.is_empty() {
+        lines.push(identity.join("  |  "));
+    }
+
+    let mut components = Vec::new();
+    if let Some(database) = response.get("database").and_then(Value::as_object) {
+        let mut details = Vec::new();
+        if let Some(database_type) = database.get("type").and_then(Value::as_str) {
+            details.push(display_name(database_type));
+        }
+        if let Some(migrations) = database.get("migration_status").and_then(Value::as_object) {
+            if let Some(unapplied) = migrations
+                .get("unapplied_migrations")
+                .and_then(Value::as_array)
+            {
+                details.push(match unapplied.len() {
+                    0 => "migrations current".to_string(),
+                    1 => "1 unapplied migration".to_string(),
+                    count => format!("{count} unapplied migrations"),
+                });
+            }
+        }
+        push_status_component(
+            &mut components,
+            "Database",
+            database.get("status"),
+            details,
+            database.get("error"),
+        );
+    }
+
+    if let Some(tasks) = response.get("tasks").and_then(Value::as_object) {
+        push_status_component(
+            &mut components,
+            "Celery",
+            tasks.get("celery_status"),
+            Vec::new(),
+            tasks.get("celery_error"),
+        );
+        push_status_component(
+            &mut components,
+            "Redis",
+            tasks.get("redis_status"),
+            Vec::new(),
+            tasks.get("redis_error"),
+        );
+        push_status_component(
+            &mut components,
+            "Classifier",
+            tasks.get("classifier_status"),
+            detail_with_timestamp(
+                "Trained",
+                tasks.get("classifier_last_trained").and_then(Value::as_str),
+            ),
+            tasks.get("classifier_error"),
+        );
+        push_status_component(
+            &mut components,
+            "Search index",
+            tasks.get("index_status"),
+            detail_with_timestamp(
+                "Updated",
+                tasks.get("index_last_modified").and_then(Value::as_str),
+            ),
+            tasks.get("index_error"),
+        );
+        push_status_component(
+            &mut components,
+            "Sanity check",
+            tasks.get("sanity_check_status"),
+            detail_with_timestamp(
+                "Last run",
+                tasks.get("sanity_check_last_run").and_then(Value::as_str),
+            ),
+            tasks.get("sanity_check_error"),
+        );
+    }
+
+    if !components.is_empty() {
+        lines.push(String::new());
+        lines.extend(render_status_table(&components));
+    }
+
+    let mut facts = Vec::new();
+    if let Some(storage) = response.get("storage").and_then(Value::as_object) {
+        if let (Some(available), Some(total)) = (
+            storage.get("available").and_then(Value::as_u64),
+            storage.get("total").and_then(Value::as_u64),
+        ) {
+            let percentage = if total == 0 {
+                String::new()
+            } else {
+                format!(" ({:.1}% free)", available as f64 / total as f64 * 100.0)
+            };
+            facts.push((
+                "Storage".to_string(),
+                format!(
+                    "{} available of {}{percentage}",
+                    format_bytes(available),
+                    format_bytes(total)
+                ),
+            ));
+        }
+    }
+    if let Some(latest_migration) = response
+        .get("database")
+        .and_then(Value::as_object)
+        .and_then(|database| database.get("migration_status"))
+        .and_then(Value::as_object)
+        .and_then(|migrations| migrations.get("latest_migration"))
+        .and_then(Value::as_str)
+    {
+        facts.push(("Migration".to_string(), latest_migration.to_string()));
+    }
+    if let Some(server_os) = response.get("server_os").and_then(Value::as_str) {
+        facts.push(("Server".to_string(), server_os.to_string()));
+    }
+
+    if !facts.is_empty() {
+        lines.push(String::new());
+        let label_width = facts
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or_default();
+        lines.extend(facts.into_iter().map(|(label, value)| {
+            format!("{label:<label_width$}  {value}", label_width = label_width)
+        }));
+    }
+
+    Some(lines)
+}
+
+fn render_status_table(rows: &[(String, String, String)]) -> Vec<String> {
+    let component_width = rows
+        .iter()
+        .map(|(component, _, _)| component.chars().count())
+        .chain(std::iter::once("COMPONENT".len()))
+        .max()
+        .unwrap_or_default();
+    let status_width = rows
+        .iter()
+        .map(|(_, status, _)| status.chars().count())
+        .chain(std::iter::once("STATUS".len()))
+        .max()
+        .unwrap_or_default();
+    let details_width = rows
+        .iter()
+        .map(|(_, _, details)| details.chars().count())
+        .chain(std::iter::once("DETAILS".len()))
+        .max()
+        .unwrap_or_default();
+
+    let border = format!(
+        "+-{:-<component_width$}-+-{:-<status_width$}-+-{:-<details_width$}-+",
+        "",
+        "",
+        "",
+        component_width = component_width,
+        status_width = status_width,
+        details_width = details_width,
+    );
+    let mut lines = vec![
+        border.clone(),
+        format!(
+            "| {:<component_width$} | {:<status_width$} | {:<details_width$} |",
+            "COMPONENT",
+            "STATUS",
+            "DETAILS",
+            component_width = component_width,
+            status_width = status_width,
+            details_width = details_width,
+        ),
+        border.clone(),
+    ];
+
+    for (component, status, details) in rows {
+        lines.push(format!(
+            "| {:<component_width$} | {:<status_width$} | {:<details_width$} |",
+            single_line(component),
+            single_line(status),
+            single_line(details),
+            component_width = component_width,
+            status_width = status_width,
+            details_width = details_width,
+        ));
+    }
+    lines.push(border);
+    lines
+}
+
+fn push_status_component(
+    components: &mut Vec<(String, String, String)>,
+    name: &str,
+    status: Option<&Value>,
+    mut details: Vec<String>,
+    error: Option<&Value>,
+) {
+    let error = error.filter(|value| non_null(value));
+    if status.is_none() && error.is_none() {
+        return;
+    }
+
+    if let Some(error) = error {
+        details.push(format!("Error: {}", display_value(error)));
+    }
+    let status = status
+        .and_then(Value::as_str)
+        .map(|status| status.to_ascii_uppercase())
+        .unwrap_or_else(|| "ERROR".to_string());
+    components.push((
+        name.to_string(),
+        status,
+        if details.is_empty() {
+            "-".to_string()
+        } else {
+            details.join("; ")
+        },
+    ));
+}
+
+fn detail_with_timestamp(label: &str, timestamp: Option<&str>) -> Vec<String> {
+    timestamp
+        .map(|timestamp| vec![format!("{label} {}", format_timestamp(timestamp))])
+        .unwrap_or_default()
+}
+
+fn format_timestamp(timestamp: &str) -> String {
+    let Some((date, time)) = timestamp.split_once('T') else {
+        return timestamp.to_string();
+    };
+    let (clock, zone) = if let Some(clock) = time.strip_suffix('Z') {
+        (clock, Some("UTC"))
+    } else if let Some(index) = time.find(['+', '-']) {
+        (&time[..index], Some(&time[index..]))
+    } else {
+        (time, None)
+    };
+    let clock = clock.split('.').next().unwrap_or(clock);
+    let clock = clock.get(..5).unwrap_or(clock);
+    match zone {
+        Some(zone) => format!("{date} {clock} {zone}"),
+        None => format!("{date} {clock}"),
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn display_name(value: &str) -> String {
+    match value.to_ascii_lowercase().as_str() {
+        "sqlite" => "SQLite".to_string(),
+        "postgres" | "postgresql" => "PostgreSQL".to_string(),
+        "kubernetes" => "Kubernetes".to_string(),
+        "docker" => "Docker".to_string(),
+        _ => {
+            let mut characters = value.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+fn display_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn non_null(value: &Value) -> bool {
+    !value.is_null()
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\r', '\n', '\t'], " ").replace('|', "/")
 }
 
 fn extract_document_text(value: &Value) -> Option<String> {

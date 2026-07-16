@@ -17,9 +17,10 @@ use paperless_cli::services::{
     delete_document, delete_document_type, delete_tag, download_document, download_preview,
     download_thumbnail, edit_document, get_correspondent, get_document, get_document_content,
     get_document_type, get_tag, get_task, init_connection, list_correspondents,
-    list_document_types, list_documents, list_tags, list_tasks, persist_session, ping,
-    query_search, sanitize_filename, search_documents, status, update_document, update_tag,
-    upload_document, DocumentQuery, OutputEnvelope, TagUpdateRequest, UpdateRequest, UploadRequest,
+    list_document_types, list_documents, list_tags, list_tasks, operational_overview,
+    persist_session, ping, query_search, sanitize_filename, search_documents, status,
+    update_document, update_tag, upload_document, DocumentQuery, OutputEnvelope, TagUpdateRequest,
+    UpdateRequest, UploadRequest,
 };
 use paperless_cli::tui::run_tui;
 use serde_json::json;
@@ -70,6 +71,9 @@ enum RootCommand {
     DocumentTypes(DocumentTypesCommand),
     #[command(name = "export", subcommand)]
     Export(ExportCommand),
+    /// Fetch status, statistics, and tasks for a full operational overview.
+    Dashboard,
+    /// Check server health and authentication using only GET /api/status/.
     Status,
 }
 
@@ -817,6 +821,16 @@ fn run_command(
                 security: auditor.review_once(&audit_state(paths, Some(&config), None)),
             }
         }
+        RootCommand::Dashboard => {
+            let config = load_config_with_override(paths, url_override)?;
+            let client = client_for_config(&config)?;
+            OutputEnvelope {
+                mode: output_name(output).to_string(),
+                command: "dashboard".to_string(),
+                data: operational_overview(&client, &config)?,
+                security: auditor.review_once(&audit_state(paths, Some(&config), None)),
+            }
+        }
         RootCommand::Status => match load_config(paths) {
             Ok(config) => {
                 let config = if let Some(url) = url_override {
@@ -1216,6 +1230,12 @@ fn run_demo_command(
                 security: Vec::new(),
             }
         }
+        RootCommand::Dashboard => OutputEnvelope {
+            mode: output_name(output).to_string(),
+            command: "dashboard".to_string(),
+            data: operational_overview(&client, &config)?,
+            security: Vec::new(),
+        },
         RootCommand::Status => OutputEnvelope {
             mode: output_name(output).to_string(),
             command: "status".to_string(),

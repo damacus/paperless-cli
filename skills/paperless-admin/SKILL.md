@@ -22,6 +22,9 @@ PAPERLESS_URL=https://paperless.example.com PAPERLESS_TOKEN=secret paperless sta
 paperless -u https://paperless.example.com status
 ```
 
+`paperless status` calls only `/api/status/`. Use `paperless dashboard` when you
+explicitly need status, statistics, and task data together.
+
 ## Tags
 
 ```bash

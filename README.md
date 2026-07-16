@@ -53,6 +53,7 @@ Request markdown or JSON output:
 paperless --output markdown document list --query "invoice 2024"
 paperless --output json search query "invoice acme"
 paperless status
+paperless dashboard
 ```
 
 ## TUI overview
@@ -73,7 +74,7 @@ For fast iteration on layout and keyboard behavior, use `paperless --demo`.
 
 | Area | Commands |
 | --- | --- |
-| top level | `login`, `status`, default TUI |
+| top level | `login`, `status`, `dashboard`, default TUI |
 | `config` | `set-url`, `set-token` |
 | `pdf` | `read`, `info` |
 | `project` | `login`, `info`, `ping` |
@@ -84,6 +85,23 @@ For fast iteration on layout and keyboard behavior, use `paperless --demo`.
 | `correspondent` | `list`, `get`, `create`, `delete` |
 | `doctype` | `list`, `get`, `create`, `delete` |
 | `export` | `bulk` |
+
+### Network behavior
+
+`paperless status` is a compact health and authentication probe. It sends only
+`GET /api/status/` and does not fetch statistics, tasks, documents, or history.
+The default terminal view uses ASCII formatting to summarize component health,
+versions, migrations, and storage. `--output json` preserves the complete API
+response for scripts.
+
+`paperless dashboard` is the explicit full operational overview. It sends:
+
+- `GET /api/status/`
+- `GET /api/statistics/`
+- `GET /api/tasks/`
+
+Help is always local and network-free, including `paperless --help`,
+`paperless help <command>`, and `paperless <command> --help`.
 
 ## Compatibility
 

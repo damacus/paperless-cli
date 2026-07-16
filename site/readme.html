@@ -43,12 +43,17 @@ paperless --output json search query "invoice acme"</code></pre>
           </figure>
           <h2>Command surface</h2>
           <ul>
+            <li>Top level: <code>login</code>, <code>status</code>, <code>dashboard</code>, and the default TUI</li>
             <li><code>config</code>: <code>set-url</code>, <code>set-token</code></li>
             <li><code>pdf</code>: <code>read</code>, <code>info</code></li>
             <li><code>project</code>: <code>login</code>, <code>info</code>, <code>ping</code></li>
             <li><code>document</code>: <code>list</code>, <code>get</code>, <code>content</code>, <code>upload</code>, <code>download</code>, <code>preview</code>, <code>thumb</code>, <code>edit</code>, <code>update</code>, <code>delete</code>, <code>search</code></li>
             <li><code>tag</code>: <code>list</code>, <code>get</code>, <code>create</code>, <code>edit</code>, <code>delete</code></li>
           </ul>
+          <h2>Network behavior</h2>
+          <p><code>paperless status</code> is a compact health and authentication probe that sends only <code>GET /api/status/</code>. Its default terminal view uses ASCII formatting to summarize component health, versions, migrations, and storage; <code>--output json</code> preserves the complete API response for scripts.</p>
+          <p><code>paperless dashboard</code> is the explicit full operational overview. It sends requests to <code>/api/status/</code>, <code>/api/statistics/</code>, and <code>/api/tasks/</code>.</p>
+          <p>All help paths are local and network-free.</p>
           <h2>Compatibility</h2>
           <ul>
             <li><code>document content &lt;id&gt;</code> returns extracted text only.</li>
