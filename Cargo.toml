@@ -1,6 +1,6 @@
 [package]
 name = "paperless-cli"
-version = "2.1.2"
+version = "2.1.3"
 edition = "2021"
 description = "Rust TUI and LLM-friendly client for Paperless-ngx"
 license = "MIT"

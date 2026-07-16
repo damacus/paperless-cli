@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.3](https://github.com/damacus/paperless-cli/compare/v2.1.2...v2.1.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* make status a compact health probe ([#27](https://github.com/damacus/paperless-cli/issues/27)) ([766c182](https://github.com/damacus/paperless-cli/commit/766c182b58af299eeaacd95c5c28d9e561f2bfda))
+
 ## [2.1.2](https://github.com/damacus/paperless-cli/compare/v2.1.1...v2.1.2) (2026-07-13)
 
 
