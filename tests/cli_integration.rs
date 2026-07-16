@@ -26,6 +26,37 @@ fn help_lists_rust_tui_output_modes() {
     assert!(stdout.contains("login"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("pdf"));
+    assert!(stdout.contains("dashboard"));
+    assert!(stdout.contains("Check server health"));
+}
+
+#[test]
+fn help_paths_make_no_http_requests_with_configured_url() {
+    let server = MockServer::start();
+    let requests = server.mock(|_when, then| {
+        then.status(500);
+    });
+    let (_dir, config, session) = base_env();
+
+    for args in [
+        vec!["--help"],
+        vec!["help", "status"],
+        vec!["status", "--help"],
+        vec!["help", "dashboard"],
+        vec!["dashboard", "--help"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+            .env("PAPERLESS_CONFIG_PATH", &config)
+            .env("PAPERLESS_SESSION_PATH", &session)
+            .env("PAPERLESS_URL", server.base_url())
+            .env("PAPERLESS_TOKEN", "env-token")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+
+    requests.assert_calls(0);
 }
 
 #[test]
@@ -43,7 +74,7 @@ fn document_list_requires_config() {
 }
 
 #[test]
-fn status_without_config_is_non_fatal_markdown_output() {
+fn status_without_config_is_non_fatal_terminal_output() {
     let (_dir, config, session) = base_env();
     let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
         .env("PAPERLESS_CONFIG_PATH", config)
@@ -53,8 +84,10 @@ fn status_without_config_is_non_fatal_markdown_output() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("connected"));
+    assert!(stdout.contains("Status  NOT CONFIGURED"));
     assert!(stdout.contains("paperless login"));
+    assert!(!stdout.contains("**"));
+    assert!(!stdout.contains('`'));
 }
 
 #[test]
@@ -69,6 +102,93 @@ fn status_without_config_is_machine_readable_in_json_mode() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     assert!(stdout.contains("\"connected\": false"));
+}
+
+#[test]
+fn status_only_calls_the_status_endpoint() {
+    let server = MockServer::start();
+    let status = server.mock(|when, then| {
+        when.method(GET).path("/api/status/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"status":"ok","version":"2.18.4"}"#);
+    });
+    let statistics = server.mock(|when, then| {
+        when.method(GET).path("/api/statistics/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"documents_total":6}"#);
+    });
+    let tasks = server.mock(|when, then| {
+        when.method(GET).path("/api/tasks/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"[]"#);
+    });
+
+    let (_dir, config, session) = base_env();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", &config)
+        .env("PAPERLESS_SESSION_PATH", &session)
+        .env("PAPERLESS_URL", server.base_url())
+        .env("PAPERLESS_TOKEN", "env-token")
+        .arg("status")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains(" ____   _    ____  _____ ____"));
+    assert!(stdout.contains("Paperless-ngx 2.18.4"));
+    assert!(!stdout.contains("Needs attention"));
+    assert!(!stdout.contains("**"));
+    assert!(!stdout.contains('`'));
+    assert!(!stdout.contains("statistics"));
+    assert!(!stdout.contains("tasks"));
+    status.assert_calls(1);
+    statistics.assert_calls(0);
+    tasks.assert_calls(0);
+}
+
+#[test]
+fn dashboard_fetches_the_explicit_operational_overview() {
+    let server = MockServer::start();
+    let status = server.mock(|when, then| {
+        when.method(GET).path("/api/status/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"status":"ok","version":"2.18.4"}"#);
+    });
+    let statistics = server.mock(|when, then| {
+        when.method(GET).path("/api/statistics/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"documents_total":6}"#);
+    });
+    let tasks = server.mock(|when, then| {
+        when.method(GET).path("/api/tasks/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"[{"id":901,"status":"SUCCESS"}]"#);
+    });
+
+    let (_dir, config, session) = base_env();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", &config)
+        .env("PAPERLESS_SESSION_PATH", &session)
+        .env("PAPERLESS_URL", server.base_url())
+        .env("PAPERLESS_TOKEN", "env-token")
+        .args(["--output", "json", "dashboard"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\"statistics\""));
+    assert!(stdout.contains("\"tasks\""));
+    status.assert_calls(1);
+    statistics.assert_calls(1);
+    tasks.assert_calls(1);
 }
 
 #[test]
@@ -252,7 +372,24 @@ fn demo_status_is_available_without_config() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     assert!(stdout.contains("\"demo\": true"));
+    assert!(stdout.contains("\"response\""));
+    assert!(!stdout.contains("\"documents_total\""));
+}
+
+#[test]
+fn demo_dashboard_includes_the_full_overview() {
+    let (_dir, config, session) = base_env();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", config)
+        .env("PAPERLESS_SESSION_PATH", session)
+        .args(["--demo", "--output", "json", "dashboard"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
     assert!(stdout.contains("\"documents_total\": 6"));
+    assert!(stdout.contains("\"tasks\""));
 }
 
 #[test]

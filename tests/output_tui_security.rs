@@ -56,6 +56,101 @@ fn documents_get_markdown_prefers_document_text_only() {
 }
 
 #[test]
+fn status_terminal_output_uses_ascii_art_and_aligned_columns() {
+    let envelope = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "status".to_string(),
+        data: json!({
+            "status": "ok",
+            "url": "https://paperless.example.com",
+            "response": {
+                "database": {
+                    "error": null,
+                    "migration_status": {
+                        "latest_migration": "documents.1075_workflowaction_order",
+                        "unapplied_migrations": []
+                    },
+                    "status": "OK",
+                    "type": "sqlite",
+                    "url": "/data/local/data/db.sqlite3"
+                },
+                "install_type": "kubernetes",
+                "pngx_version": "2.20.15",
+                "server_os": "Linux-aarch64",
+                "storage": {
+                    "available": 11047809318912_u64,
+                    "total": 11984892329984_u64
+                },
+                "tasks": {
+                    "celery_error": "Error connecting to celery, check logs for more detail.",
+                    "celery_status": "ERROR",
+                    "celery_url": "celery@paperless-secret-pod",
+                    "classifier_error": null,
+                    "classifier_last_trained": "2026-07-16T08:05:04.176750Z",
+                    "classifier_status": "OK",
+                    "index_error": null,
+                    "index_last_modified": "2026-07-16T00:00:04.495783+01:00",
+                    "index_status": "OK",
+                    "redis_error": null,
+                    "redis_status": "OK",
+                    "redis_url": "redis://internal.example:6379",
+                    "sanity_check_error": null,
+                    "sanity_check_last_run": "2026-07-11T23:31:51.188118Z",
+                    "sanity_check_status": "OK"
+                }
+            }
+        }),
+        security: vec![],
+    };
+
+    let terminal = render_output(OutputMode::Markdown, &envelope).unwrap();
+    assert!(terminal.contains(" ____   _    ____  _____ ____"));
+    assert!(terminal.contains("Paperless-ngx 2.20.15  |  Kubernetes"));
+    assert!(terminal.contains("| Database     | OK     | SQLite; migrations current"));
+    assert!(terminal.contains(
+        "| Celery       | ERROR  | Error: Error connecting to celery, check logs for more detail."
+    ));
+    assert!(terminal.contains("| Classifier   | OK     | Trained 2026-07-16 08:05 UTC"));
+    assert!(terminal.contains("Storage    10.0 TiB available of 10.9 TiB (92.2% free)"));
+    assert!(terminal.contains("Migration  documents.1075_workflowaction_order"));
+    assert!(!terminal.contains("Needs attention"));
+    assert!(!terminal.contains("https://paperless.example.com"));
+    assert!(!terminal.contains("**"));
+    assert!(!terminal.contains('`'));
+    assert!(!terminal.contains("redis://"));
+    assert!(!terminal.contains("celery@"));
+    assert!(!terminal.contains("null"));
+    assert!(!terminal.contains("11047809318912"));
+
+    let lines = terminal.lines().collect::<Vec<_>>();
+    let header_index = lines
+        .iter()
+        .position(|line| line.starts_with("| COMPONENT"))
+        .unwrap();
+    let mut table_rows = vec![lines[header_index]];
+    for line in &lines[header_index + 2..] {
+        if line.starts_with('+') {
+            break;
+        }
+        table_rows.push(line);
+    }
+    let expected_boundaries = table_rows[0]
+        .char_indices()
+        .filter_map(|(index, character)| (character == '|').then_some(index))
+        .collect::<Vec<_>>();
+    assert!(table_rows.iter().all(|row| {
+        row.char_indices()
+            .filter_map(|(index, character)| (character == '|').then_some(index))
+            .collect::<Vec<_>>()
+            == expected_boundaries
+    }));
+
+    let json = render_output(OutputMode::Json, &envelope).unwrap();
+    assert!(json.contains("\"redis_url\": \"redis://internal.example:6379\""));
+    assert!(json.contains("\"available\": 11047809318912"));
+}
+
+#[test]
 fn document_text_representation_falls_back_cleanly() {
     let text = document_text_representation(&json!({
         "title": "Invoice",

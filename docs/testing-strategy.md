@@ -37,8 +37,10 @@ shifting the architecture to a Rust TUI and agent-friendly outputs.
 `tests/cli_integration.rs` covers:
 
 - top-level help surface
+- network-free top-level and subcommand help paths
 - missing-config failure for document commands
 - graceful status behavior when nothing is configured
+- single-endpoint status behavior and explicit multi-endpoint dashboard behavior
 - `config set-url` and `config set-token`
 - `document content`
 - `pdf read` and `pdf info`

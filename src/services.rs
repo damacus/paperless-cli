@@ -605,11 +605,18 @@ pub fn bulk_download_zip<T: Transport>(
 }
 
 pub fn status<T: Transport>(client: &ApiClient<T>, config: &AppConfig) -> Result<Value, AppError> {
-    let ping = ping(client, config)?;
+    ping(client, config)
+}
+
+pub fn operational_overview<T: Transport>(
+    client: &ApiClient<T>,
+    config: &AppConfig,
+) -> Result<Value, AppError> {
+    let status = status(client, config)?;
     let statistics = client.get_json("statistics/", Vec::new())?;
     let tasks = list_tasks(client)?;
     Ok(json!({
-        "project": ping,
+        "status": status,
         "statistics": statistics,
         "tasks": tasks,
     }))
