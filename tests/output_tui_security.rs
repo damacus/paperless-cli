@@ -120,7 +120,7 @@ fn collection_output_uses_resource_specific_columns() {
 fn collection_output_handles_pagination_corrections_suggestions_and_empty_results() {
     let paginated = OutputEnvelope {
         mode: "markdown".to_string(),
-        command: "search query".to_string(),
+        command: "documents search".to_string(),
         data: json!({
             "count": 153,
             "corrected_query": "invoice",
@@ -153,6 +153,47 @@ fn collection_output_handles_pagination_corrections_suggestions_and_empty_result
     assert_eq!(
         render_output(OutputMode::Markdown, &empty).unwrap(),
         "No documents found."
+    );
+}
+
+#[test]
+fn global_search_output_groups_mixed_resource_types() {
+    let envelope = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "search query".to_string(),
+        data: json!({
+            "documents": [{"id": 7, "created": "2026-08-12", "title": "Invoice"}],
+            "tags": [{"id": 2, "name": "invoice", "is_inbox_tag": false}],
+            "document_types": [{"id": 3, "name": "invoice"}],
+            "correspondents": [],
+            "custom_fields": [],
+            "groups": [],
+            "mail_accounts": [],
+            "mail_rules": [],
+            "saved_views": [],
+            "storage_paths": [],
+            "users": [],
+            "workflows": [],
+            "total": 3
+        }),
+        security: vec![],
+    };
+
+    let terminal = render_output(OutputMode::Markdown, &envelope).unwrap();
+    assert!(terminal.starts_with("3 results\n\nDOCUMENTS (1)\nID  DATE        TITLE"));
+    assert!(terminal.contains("\nTAGS (1)\nID  NAME     INBOX"));
+    assert!(terminal.contains("\nDOCUMENT TYPES (1)\nID  NAME"));
+    assert!(!terminal.contains("CORRESPONDENTS"));
+
+    let empty = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "search query".to_string(),
+        data: json!({"total": 0}),
+        security: vec![],
+    };
+    assert_eq!(
+        render_output(OutputMode::Markdown, &empty).unwrap(),
+        "No results found."
     );
 }
 

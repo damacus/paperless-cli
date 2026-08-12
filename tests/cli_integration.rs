@@ -439,7 +439,7 @@ fn demo_collection_commands_use_compact_terminal_output() {
         ),
         (
             vec!["--demo", "search", "query", "invoice"],
-            ["3 documents", "ID   DATE        TITLE"],
+            ["5 results", "DOCUMENT TYPES (1)"],
         ),
         (
             vec!["--demo", "tag", "list"],

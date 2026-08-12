@@ -61,7 +61,7 @@ const NAMED_RESOURCE_COLUMNS: &[CollectionColumn] = &[
     },
     CollectionColumn {
         header: "NAME",
-        keys: &["name"],
+        keys: &["name", "username", "title"],
         style: CellStyle::Value,
     },
 ];
@@ -139,9 +139,10 @@ fn fallback_lines(data: &Value) -> Vec<String> {
 
 fn render_collection_terminal(command: &str, data: &Value) -> Option<Vec<String>> {
     match command {
-        "documents list" | "documents search" | "search query" => {
+        "documents list" | "documents search" => {
             render_tabular_collection(data, "document", "documents", DOCUMENT_COLUMNS)
         }
+        "search query" => render_global_search(data),
         "tags list" => render_tabular_collection(data, "tag", "tags", TAG_COLUMNS),
         "correspondents list" => render_tabular_collection(
             data,
@@ -159,6 +160,67 @@ fn render_collection_terminal(command: &str, data: &Value) -> Option<Vec<String>
         "search autocomplete" => render_suggestions(data),
         _ => None,
     }
+}
+
+fn render_global_search(data: &Value) -> Option<Vec<String>> {
+    let search = data.as_object()?;
+    let total = search.get("total")?.as_u64()?;
+    if total == 0 {
+        return Some(vec!["No results found.".to_string()]);
+    }
+
+    let mut lines = vec![format!(
+        "{total} {}",
+        if total == 1 { "result" } else { "results" }
+    )];
+    for (key, label, columns) in global_search_categories() {
+        let Some(items) = search.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        if items.is_empty() {
+            continue;
+        }
+        let rows = items
+            .iter()
+            .map(|item| {
+                let object = item.as_object()?;
+                Some(
+                    columns
+                        .iter()
+                        .map(|column| collection_cell(object, *column))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let headers = columns
+            .iter()
+            .map(|column| column.header.to_string())
+            .collect::<Vec<_>>();
+
+        lines.push(String::new());
+        lines.push(format!("{label} ({})", items.len()));
+        lines.extend(render_text_table(&headers, &rows));
+    }
+    Some(lines)
+}
+
+fn global_search_categories(
+) -> impl Iterator<Item = (&'static str, &'static str, &'static [CollectionColumn])> {
+    [
+        ("documents", "DOCUMENTS", DOCUMENT_COLUMNS),
+        ("tags", "TAGS", TAG_COLUMNS),
+        ("correspondents", "CORRESPONDENTS", NAMED_RESOURCE_COLUMNS),
+        ("document_types", "DOCUMENT TYPES", NAMED_RESOURCE_COLUMNS),
+        ("custom_fields", "CUSTOM FIELDS", NAMED_RESOURCE_COLUMNS),
+        ("saved_views", "SAVED VIEWS", NAMED_RESOURCE_COLUMNS),
+        ("storage_paths", "STORAGE PATHS", NAMED_RESOURCE_COLUMNS),
+        ("mail_accounts", "MAIL ACCOUNTS", NAMED_RESOURCE_COLUMNS),
+        ("mail_rules", "MAIL RULES", NAMED_RESOURCE_COLUMNS),
+        ("workflows", "WORKFLOWS", NAMED_RESOURCE_COLUMNS),
+        ("users", "USERS", NAMED_RESOURCE_COLUMNS),
+        ("groups", "GROUPS", NAMED_RESOURCE_COLUMNS),
+    ]
+    .into_iter()
 }
 
 fn render_tabular_collection(

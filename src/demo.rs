@@ -307,17 +307,44 @@ fn search_documents(query: &[(String, String)]) -> Result<ResponseData, AppError
     let search = query_value(query, "query")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let results = demo_documents()
+    let documents = demo_documents()
         .into_iter()
         .filter(|document| matches_query(document, &search))
         .collect::<Vec<_>>();
+    let tags = matching_named_items(demo_tags(), &search);
+    let correspondents = matching_named_items(demo_correspondents(), &search);
+    let document_types = matching_named_items(demo_document_types(), &search);
+    let total = documents.len() + tags.len() + correspondents.len() + document_types.len();
     ok_json(
         "search/",
         json!({
-            "count": results.len(),
-            "results": results,
+            "correspondents": correspondents,
+            "custom_fields": [],
+            "document_types": document_types,
+            "documents": documents,
+            "groups": [],
+            "mail_accounts": [],
+            "mail_rules": [],
+            "saved_views": [],
+            "storage_paths": [],
+            "tags": tags,
+            "total": total,
+            "users": [],
+            "workflows": [],
         }),
     )
+}
+
+fn matching_named_items(items: Vec<Value>, search: &str) -> Vec<Value> {
+    items
+        .into_iter()
+        .filter(|item| {
+            ["name", "match"]
+                .iter()
+                .filter_map(|key| item.get(*key).and_then(Value::as_str))
+                .any(|value| value.to_ascii_lowercase().contains(search))
+        })
+        .collect()
 }
 
 fn autocomplete(query: &[(String, String)]) -> Result<ResponseData, AppError> {
