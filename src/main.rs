@@ -135,6 +135,12 @@ struct IdArgs {
 struct DocumentListArgs {
     #[arg(long)]
     query: Option<String>,
+    #[command(flatten)]
+    filters: DocumentFilterArgs,
+}
+
+#[derive(Args, Debug)]
+struct DocumentFilterArgs {
     #[arg(long)]
     tag: Option<String>,
     #[arg(long)]
@@ -224,7 +230,7 @@ struct DocumentEditArgs {
 struct DocumentSearchArgs {
     query: String,
     #[command(flatten)]
-    filters: DocumentListArgs,
+    filters: DocumentFilterArgs,
 }
 
 #[derive(Subcommand, Debug)]
@@ -480,7 +486,7 @@ fn run_command(
             let mut session = paperless_cli::config::load_session(paths);
             let envelope = match documents_command {
                 DocumentsCommand::List(args) => {
-                    let query = document_query_from_args(&args);
+                    let query = document_query_from_list_args(&args);
                     if let Some(search) = &query.query {
                         session.last_query = search.clone();
                     }
@@ -626,8 +632,7 @@ fn run_command(
                 }
                 DocumentsCommand::Search(args) => {
                     session.last_query = args.query.clone();
-                    let mut query = document_query_from_args(&args.filters);
-                    query.query = Some(args.query.clone());
+                    let query = document_query_from_search_args(&args);
                     OutputEnvelope {
                         mode: output_name(output).to_string(),
                         command: "documents search".to_string(),
@@ -961,7 +966,7 @@ fn run_demo_command(
         },
         RootCommand::Documents(documents_command) => match documents_command {
             DocumentsCommand::List(args) => {
-                let query = document_query_from_args(&args);
+                let query = document_query_from_list_args(&args);
                 OutputEnvelope {
                     mode: output_name(output).to_string(),
                     command: "documents list".to_string(),
@@ -1073,8 +1078,7 @@ fn run_demo_command(
                 }
             }
             DocumentsCommand::Search(args) => {
-                let mut query = document_query_from_args(&args.filters);
-                query.query = Some(args.query.clone());
+                let query = document_query_from_search_args(&args);
                 OutputEnvelope {
                     mode: output_name(output).to_string(),
                     command: "documents search".to_string(),
@@ -1389,20 +1393,31 @@ fn output_name(output: OutputMode) -> &'static str {
     }
 }
 
-fn document_query_from_args(args: &DocumentListArgs) -> DocumentQuery {
+fn document_query_from_list_args(args: &DocumentListArgs) -> DocumentQuery {
+    document_query_from_filters(args.query.clone(), &args.filters)
+}
+
+fn document_query_from_search_args(args: &DocumentSearchArgs) -> DocumentQuery {
+    document_query_from_filters(Some(args.query.clone()), &args.filters)
+}
+
+fn document_query_from_filters(
+    query: Option<String>,
+    filters: &DocumentFilterArgs,
+) -> DocumentQuery {
     DocumentQuery {
-        query: args.query.clone(),
-        tag: args.tag.clone(),
-        tag_id: args.tag_id,
-        correspondent: args.correspondent.clone(),
-        correspondent_id: args.correspondent_id,
-        document_type: args.document_type.clone(),
-        document_type_id: args.type_id,
-        created_after: args.created_after.clone(),
-        created_before: args.created_before.clone(),
-        order_by: args.order_by.clone(),
-        page_size: args.page_size,
-        page: args.page,
+        query,
+        tag: filters.tag.clone(),
+        tag_id: filters.tag_id,
+        correspondent: filters.correspondent.clone(),
+        correspondent_id: filters.correspondent_id,
+        document_type: filters.document_type.clone(),
+        document_type_id: filters.type_id,
+        created_after: filters.created_after.clone(),
+        created_before: filters.created_before.clone(),
+        order_by: filters.order_by.clone(),
+        page_size: filters.page_size,
+        page: filters.page,
     }
 }
 

@@ -4,6 +4,86 @@ use crate::config::OutputMode;
 use crate::error::AppError;
 use crate::services::OutputEnvelope;
 
+#[derive(Clone, Copy)]
+enum CellStyle {
+    Value,
+    YesNo,
+}
+
+#[derive(Clone, Copy)]
+struct CollectionColumn {
+    header: &'static str,
+    keys: &'static [&'static str],
+    style: CellStyle,
+}
+
+const DOCUMENT_COLUMNS: &[CollectionColumn] = &[
+    CollectionColumn {
+        header: "ID",
+        keys: &["id"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "DATE",
+        keys: &["created", "created_date"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "TITLE",
+        keys: &["title"],
+        style: CellStyle::Value,
+    },
+];
+
+const TAG_COLUMNS: &[CollectionColumn] = &[
+    CollectionColumn {
+        header: "ID",
+        keys: &["id"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "NAME",
+        keys: &["name"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "INBOX",
+        keys: &["is_inbox_tag"],
+        style: CellStyle::YesNo,
+    },
+];
+
+const NAMED_RESOURCE_COLUMNS: &[CollectionColumn] = &[
+    CollectionColumn {
+        header: "ID",
+        keys: &["id"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "NAME",
+        keys: &["name"],
+        style: CellStyle::Value,
+    },
+];
+
+const TASK_COLUMNS: &[CollectionColumn] = &[
+    CollectionColumn {
+        header: "ID",
+        keys: &["task_id", "id"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "STATUS",
+        keys: &["status"],
+        style: CellStyle::Value,
+    },
+    CollectionColumn {
+        header: "FILE",
+        keys: &["task_file_name", "file_name"],
+        style: CellStyle::Value,
+    },
+];
+
 pub fn render_output(mode: OutputMode, envelope: &OutputEnvelope) -> Result<String, AppError> {
     match mode {
         OutputMode::Json => Ok(serde_json::to_string_pretty(envelope)?),
@@ -24,17 +104,14 @@ pub fn render_markdown(envelope: &OutputEnvelope) -> String {
         }
     }
 
-    let mut lines = if envelope.command == "status" {
-        render_status_terminal(&envelope.data).unwrap_or_else(|| {
-            let mut lines = Vec::new();
-            render_value_as_markdown(&mut lines, &envelope.data, 0);
+    let mut lines =
+        if let Some(lines) = render_collection_terminal(&envelope.command, &envelope.data) {
             lines
-        })
-    } else {
-        let mut lines = Vec::new();
-        render_value_as_markdown(&mut lines, &envelope.data, 0);
-        lines
-    };
+        } else if envelope.command == "status" {
+            render_status_terminal(&envelope.data).unwrap_or_else(|| fallback_lines(&envelope.data))
+        } else {
+            fallback_lines(&envelope.data)
+        };
 
     if !envelope.security.is_empty() {
         lines.push(String::new());
@@ -52,6 +129,194 @@ pub fn render_markdown(envelope: &OutputEnvelope) -> String {
     }
 
     lines.join("\n")
+}
+
+fn fallback_lines(data: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    render_value_as_markdown(&mut lines, data, 0);
+    lines
+}
+
+fn render_collection_terminal(command: &str, data: &Value) -> Option<Vec<String>> {
+    match command {
+        "documents list" | "documents search" | "search query" => {
+            render_tabular_collection(data, "document", "documents", DOCUMENT_COLUMNS)
+        }
+        "tags list" => render_tabular_collection(data, "tag", "tags", TAG_COLUMNS),
+        "correspondents list" => render_tabular_collection(
+            data,
+            "correspondent",
+            "correspondents",
+            NAMED_RESOURCE_COLUMNS,
+        ),
+        "document-types list" => render_tabular_collection(
+            data,
+            "document type",
+            "document types",
+            NAMED_RESOURCE_COLUMNS,
+        ),
+        "tasks list" => render_tabular_collection(data, "task", "tasks", TASK_COLUMNS),
+        "search autocomplete" => render_suggestions(data),
+        _ => None,
+    }
+}
+
+fn render_tabular_collection(
+    data: &Value,
+    singular: &str,
+    plural: &str,
+    columns: &[CollectionColumn],
+) -> Option<Vec<String>> {
+    let (items, total) = collection_items(data)?;
+    let shown = items.len();
+    let mut lines = vec![collection_summary(shown, total, singular, plural)];
+
+    if let Some(corrected_query) = data
+        .get("corrected_query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+    {
+        lines.push(format!("Corrected query: {}", single_line(corrected_query)));
+    }
+
+    if items.is_empty() {
+        return Some(lines);
+    }
+
+    let rows = items
+        .iter()
+        .map(|item| {
+            let object = item.as_object()?;
+            Some(
+                columns
+                    .iter()
+                    .map(|column| collection_cell(object, *column))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let headers = columns
+        .iter()
+        .map(|column| column.header.to_string())
+        .collect::<Vec<_>>();
+
+    lines.push(String::new());
+    lines.extend(render_text_table(&headers, &rows));
+    Some(lines)
+}
+
+fn collection_items(data: &Value) -> Option<(&[Value], u64)> {
+    match data {
+        Value::Array(items) => Some((items, items.len() as u64)),
+        Value::Object(object) => {
+            let items = object.get("results")?.as_array()?;
+            let total = object
+                .get("count")
+                .and_then(Value::as_u64)
+                .unwrap_or(items.len() as u64);
+            Some((items, total))
+        }
+        _ => None,
+    }
+}
+
+fn collection_summary(shown: usize, total: u64, singular: &str, plural: &str) -> String {
+    if shown == 0 {
+        return format!("No {plural} found.");
+    }
+    if shown as u64 != total {
+        return format!("{shown} shown of {total} {plural}");
+    }
+    if total == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{total} {plural}")
+    }
+}
+
+fn collection_cell(object: &serde_json::Map<String, Value>, column: CollectionColumn) -> String {
+    let value = column.keys.iter().find_map(|key| object.get(*key));
+    match (column.style, value) {
+        (CellStyle::YesNo, Some(Value::Bool(true))) => "yes".to_string(),
+        (CellStyle::YesNo, Some(Value::Bool(false))) => "no".to_string(),
+        (_, Some(Value::String(text))) => {
+            let text = single_line(text);
+            if text.is_empty() {
+                "-".to_string()
+            } else {
+                text
+            }
+        }
+        (_, Some(Value::Number(number))) => number.to_string(),
+        (_, Some(Value::Bool(boolean))) => boolean.to_string(),
+        _ => "-".to_string(),
+    }
+}
+
+fn render_text_table(headers: &[String], rows: &[Vec<String>]) -> Vec<String> {
+    let widths = headers
+        .iter()
+        .enumerate()
+        .map(|(index, header)| {
+            rows.iter()
+                .filter_map(|row| row.get(index))
+                .map(|cell| cell.chars().count())
+                .chain(std::iter::once(header.chars().count()))
+                .max()
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+
+    let mut lines = vec![render_text_row(headers, &widths)];
+    let separator = widths
+        .iter()
+        .map(|width| "-".repeat(*width))
+        .collect::<Vec<_>>();
+    lines.push(render_text_row(&separator, &widths));
+    lines.extend(rows.iter().map(|row| render_text_row(row, &widths)));
+    lines
+}
+
+fn render_text_row(cells: &[String], widths: &[usize]) -> String {
+    cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| {
+            if index + 1 == cells.len() {
+                cell.clone()
+            } else {
+                format!("{cell:<width$}", width = widths[index])
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+fn render_suggestions(data: &Value) -> Option<Vec<String>> {
+    let suggestions = data.as_array()?;
+    if suggestions.is_empty() {
+        return Some(vec!["No suggestions found.".to_string()]);
+    }
+
+    let mut lines = vec![format!(
+        "{} {}",
+        suggestions.len(),
+        if suggestions.len() == 1 {
+            "suggestion"
+        } else {
+            "suggestions"
+        }
+    )];
+    lines.push(String::new());
+    lines.extend(suggestions.iter().map(|suggestion| {
+        suggestion
+            .as_str()
+            .map(single_line)
+            .filter(|suggestion| !suggestion.is_empty())
+            .unwrap_or_else(|| "-".to_string())
+    }));
+    Some(lines)
 }
 
 fn render_status_terminal(data: &Value) -> Option<Vec<String>> {
@@ -376,7 +641,11 @@ fn non_null(value: &Value) -> bool {
 }
 
 fn single_line(value: &str) -> String {
-    value.replace(['\r', '\n', '\t'], " ").replace('|', "/")
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('|', "/")
 }
 
 fn extract_document_text(value: &Value) -> Option<String> {

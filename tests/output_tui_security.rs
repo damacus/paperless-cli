@@ -14,28 +14,146 @@ use ratatui::Terminal;
 use serde_json::json;
 
 #[test]
-fn markdown_and_json_output_are_llm_friendly() {
+fn document_collection_output_is_compact_and_json_stays_complete() {
     let envelope = OutputEnvelope {
         mode: "markdown".to_string(),
-        command: "documents list".to_string(),
+        command: "documents search".to_string(),
         data: json!({
+            "all": [1, 2],
+            "corrected_query": null,
             "count": 2,
+            "next": null,
+            "previous": null,
             "results": [
-                {"id": 1, "title": "Invoice A", "created": "2024-01-01"},
-                {"id": 2, "title": "Invoice B", "created": "2024-01-02"}
+                {
+                    "id": 1,
+                    "title": "Invoice A",
+                    "created": "2024-01-01",
+                    "content": "Line one\nLine two",
+                    "__search_hit__": {"rank": 0}
+                },
+                {
+                    "id": 2,
+                    "title": "Invoice B",
+                    "created": "2024-01-02",
+                    "added": "2024-01-03T12:34:56Z"
+                }
             ]
         }),
         security: vec![],
     };
 
-    let markdown = render_output(OutputMode::Markdown, &envelope).unwrap();
-    assert!(markdown.contains("| id | title | created |"));
-    assert!(!markdown.contains("## Security"));
-    assert!(!markdown.contains("Mode:"));
+    let terminal = render_output(OutputMode::Markdown, &envelope).unwrap();
+    assert!(terminal.starts_with("2 documents\n\nID  DATE        TITLE"));
+    assert!(terminal.contains("1   2024-01-01  Invoice A"));
+    assert!(terminal.contains("2   2024-01-02  Invoice B"));
+    for hidden in [
+        "**",
+        "| id |",
+        "null",
+        "__search_hit__",
+        "Line one",
+        "added",
+        "all",
+        "next",
+        "previous",
+    ] {
+        assert!(
+            !terminal.contains(hidden),
+            "unexpected {hidden:?} in {terminal}"
+        );
+    }
 
     let json = render_output(OutputMode::Json, &envelope).unwrap();
-    assert!(json.contains("\"command\": \"documents list\""));
-    assert!(json.contains("\"security\": []"));
+    assert!(json.contains("\"command\": \"documents search\""));
+    assert!(json.contains("\"__search_hit__\""));
+    assert!(json.contains("\"all\""));
+    assert!(json.contains("\"added\""));
+}
+
+#[test]
+fn collection_output_uses_resource_specific_columns() {
+    let cases = [
+        (
+            "tags list",
+            json!([{"id": 60, "name": "TODO", "color": "#f97316", "is_inbox_tag": true}]),
+            "1 tag\n\nID  NAME  INBOX\n--  ----  -----\n60  TODO  yes",
+        ),
+        (
+            "correspondents list",
+            json!([{"id": 14, "name": "Business Bank", "match": "account statement"}]),
+            "1 correspondent\n\nID  NAME\n--  -------------\n14  Business Bank",
+        ),
+        (
+            "document-types list",
+            json!([{"id": 9, "name": "statement", "match": "statement"}]),
+            "1 document type\n\nID  NAME\n--  ---------\n9   statement",
+        ),
+        (
+            "tasks list",
+            json!([{
+                "task_id": 901,
+                "status": "SUCCESS",
+                "task_file_name": "invoice.pdf\n",
+                "type": "consume_file",
+                "result": "Imported"
+            }]),
+            "1 task\n\nID   STATUS   FILE\n---  -------  -----------\n901  SUCCESS  invoice.pdf",
+        ),
+    ];
+
+    for (command, data, expected) in cases {
+        let envelope = OutputEnvelope {
+            mode: "markdown".to_string(),
+            command: command.to_string(),
+            data,
+            security: vec![],
+        };
+        assert_eq!(
+            render_output(OutputMode::Markdown, &envelope).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn collection_output_handles_pagination_corrections_suggestions_and_empty_results() {
+    let paginated = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "search query".to_string(),
+        data: json!({
+            "count": 153,
+            "corrected_query": "invoice",
+            "results": [{"id": 7, "created_date": "2026-08-12", "title": "Invoice"}]
+        }),
+        security: vec![],
+    };
+    let terminal = render_output(OutputMode::Markdown, &paginated).unwrap();
+    assert!(terminal.starts_with(
+        "1 shown of 153 documents\nCorrected query: invoice\n\nID  DATE        TITLE"
+    ));
+
+    let suggestions = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "search autocomplete".to_string(),
+        data: json!(["Invoice A", "Invoice\nB"]),
+        security: vec![],
+    };
+    assert_eq!(
+        render_output(OutputMode::Markdown, &suggestions).unwrap(),
+        "2 suggestions\n\nInvoice A\nInvoice B"
+    );
+
+    let empty = OutputEnvelope {
+        mode: "markdown".to_string(),
+        command: "documents list".to_string(),
+        data: json!({"count": 0, "results": []}),
+        security: vec![],
+    };
+    assert_eq!(
+        render_output(OutputMode::Markdown, &empty).unwrap(),
+        "No documents found."
+    );
 }
 
 #[test]

@@ -419,6 +419,72 @@ fn demo_document_commands_return_fixture_data() {
 }
 
 #[test]
+fn demo_collection_commands_use_compact_terminal_output() {
+    let (_dir, config, session) = base_env();
+    let cases = [
+        (
+            vec!["--demo", "document", "list"],
+            ["6 documents", "ID   DATE        TITLE"],
+        ),
+        (
+            vec![
+                "--demo",
+                "document",
+                "search",
+                "invoice",
+                "--page-size",
+                "100",
+            ],
+            ["3 documents", "ID   DATE        TITLE"],
+        ),
+        (
+            vec!["--demo", "search", "query", "invoice"],
+            ["3 documents", "ID   DATE        TITLE"],
+        ),
+        (
+            vec!["--demo", "tag", "list"],
+            ["4 tags", "ID  NAME     INBOX"],
+        ),
+        (
+            vec!["--demo", "correspondent", "list"],
+            ["6 correspondents", "ID  NAME"],
+        ),
+        (
+            vec!["--demo", "doctype", "list"],
+            ["4 document types", "ID  NAME"],
+        ),
+        (vec!["--demo", "task", "list"], ["2 tasks", "ID   STATUS"]),
+        (
+            vec!["--demo", "search", "autocomplete", "invoice"],
+            ["3 suggestions", "Consulting Invoice March 2026"],
+        ),
+    ];
+
+    for (args, expected) in cases {
+        let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+            .env("PAPERLESS_CONFIG_PATH", &config)
+            .env("PAPERLESS_SESSION_PATH", &session)
+            .args(&args)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{args:?}: {stdout}");
+        for fragment in expected {
+            assert!(
+                stdout.contains(fragment),
+                "missing {fragment:?} for {args:?}: {stdout}"
+            );
+        }
+        for leaked in ["**", "| ---", "__search_hit__", "null"] {
+            assert!(
+                !stdout.contains(leaked),
+                "unexpected {leaked:?} for {args:?}: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
 fn demo_download_writes_fixture_file() {
     let (_dir, config, session) = base_env();
     let output_dir = tempdir().unwrap();
