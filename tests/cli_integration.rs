@@ -266,6 +266,48 @@ fn login_with_username_and_password_fetches_token() {
 }
 
 #[test]
+fn login_falls_back_when_status_endpoint_returns_403() {
+    let server = MockServer::start();
+    // /api/status/ returns 403 (Paperless-ngx 3.x view_status restriction)
+    server.mock(|when, then| {
+        when.method(GET).path("/api/status/");
+        then.status(403)
+            .header("content-type", "text/html")
+            .body("Insufficient permissions");
+    });
+    // Fallback: /api/documents/?page_size=1 succeeds
+    server.mock(|when, then| {
+        when.method(GET).path("/api/documents/");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"count":1,"next":null,"previous":null,"results":[]}"#);
+    });
+
+    let (_dir, config, session) = base_env();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", &config)
+        .env("PAPERLESS_SESSION_PATH", &session)
+        .args([
+            "--output",
+            "json",
+            "login",
+            "--url",
+            &server.base_url(),
+            "--token",
+            "test-token",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "login should succeed even when /api/status/ returns 403, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("\"status\": \"ok\""));
+}
+
+#[test]
 fn config_set_url_uses_env_token() {
     let (_dir, config, session) = base_env();
     let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
