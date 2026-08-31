@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.4](https://github.com/damacus/paperless-cli/compare/v2.1.3...v2.1.4) (2026-08-31)
+
+
+### Bug Fixes
+
+* fall back from /api/status/ on 403 for Paperless-ngx 3.x ([#32](https://github.com/damacus/paperless-cli/issues/32)) ([5a80da3](https://github.com/damacus/paperless-cli/commit/5a80da39bf77893526162cabf6092dfbea374e29))
+* improve collection output ([#30](https://github.com/damacus/paperless-cli/issues/30)) ([703b1da](https://github.com/damacus/paperless-cli/commit/703b1dadead9908c7370ef34c5706c2cf36140dc))
+
 ## [2.1.3](https://github.com/damacus/paperless-cli/compare/v2.1.2...v2.1.3) (2026-07-16)
 
 
