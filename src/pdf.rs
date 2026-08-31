@@ -165,7 +165,7 @@ fn decode_pdf_string(bytes: &[u8]) -> Option<String> {
 
     if bytes.starts_with(&[0xFE, 0xFF]) {
         let mut units = Vec::with_capacity((bytes.len().saturating_sub(2)) / 2);
-        for chunk in bytes[2..].chunks_exact(2) {
+        for chunk in bytes[2..].as_chunks::<2>().0 {
             units.push(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
         return String::from_utf16(&units).ok();
@@ -173,7 +173,7 @@ fn decode_pdf_string(bytes: &[u8]) -> Option<String> {
 
     if bytes.starts_with(&[0xFF, 0xFE]) {
         let mut units = Vec::with_capacity((bytes.len().saturating_sub(2)) / 2);
-        for chunk in bytes[2..].chunks_exact(2) {
+        for chunk in bytes[2..].as_chunks::<2>().0 {
             units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
         }
         return String::from_utf16(&units).ok();

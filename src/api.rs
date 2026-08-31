@@ -330,12 +330,29 @@ impl<T: Transport> ApiClient<T> {
     }
 
     pub fn ping(&self, base_url: &str) -> Result<Value, AppError> {
-        let response = self.get_json("status/", Vec::new())?;
-        Ok(json!({
-            "status": "ok",
-            "url": base_url,
-            "response": response,
-        }))
+        // Try /api/status/ first — it returns rich version/component data.
+        // Paperless-ngx 3.x restricts this endpoint to users with the
+        // view_status permission, so fall back to a lightweight documents
+        // probe when we get a 403.
+        match self.get_json("status/", Vec::new()) {
+            Ok(response) => Ok(json!({
+                "status": "ok",
+                "url": base_url,
+                "response": response,
+            })),
+            Err(AppError::Http { status: 403, .. }) => {
+                let response = self.get_json(
+                    "documents/",
+                    vec![("page_size".to_string(), "1".to_string())],
+                )?;
+                Ok(json!({
+                    "status": "ok",
+                    "url": base_url,
+                    "response": response,
+                }))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn decode_json_response(&self, response: ResponseData) -> Result<Value, AppError> {

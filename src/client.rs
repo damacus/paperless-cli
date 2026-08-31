@@ -173,7 +173,18 @@ impl PaperlessClient {
     }
 
     pub async fn ping(&self) -> Result<Value> {
-        self.get("status/", &[]).await
+        // Try /api/status/ first — it returns rich version/component data.
+        // Paperless-ngx 3.x restricts this endpoint to users with the
+        // view_status permission, so fall back to a lightweight documents
+        // probe when we get a 403.
+        match self.get("status/", &[]).await {
+            Ok(value) => Ok(value),
+            Err(error) if error.to_string().contains("Permission denied") => {
+                self.get("documents/", &[("page_size".to_string(), "1".to_string())])
+                    .await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn exchange_token(base_url: &str, username: &str, password: &str) -> Result<String> {
