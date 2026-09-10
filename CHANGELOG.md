@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.5](https://github.com/damacus/paperless-cli/compare/v2.1.4...v2.1.5) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate dirs to v7 ([#38](https://github.com/damacus/paperless-cli/issues/38)) ([6f559e1](https://github.com/damacus/paperless-cli/commit/6f559e1cbb01b064e7fd07a38847decf35b78310))
+
 ## [2.1.4](https://github.com/damacus/paperless-cli/compare/v2.1.3...v2.1.4) (2026-08-31)
 
 
