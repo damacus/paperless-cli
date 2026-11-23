@@ -2,5 +2,28 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>damacus/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge minor and patch updates for stable versions after checks pass",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^v?0(?:\\.|$)/",
+      "automerge": true,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Trigger patch releases for Rust runtime and build dependency updates",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dependencies", "build-dependencies"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "Trigger patch releases for release checkout and toolchain updates",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/release-please.yml"],
+      "matchPackageNames": ["actions/checkout", "dtolnay/rust-toolchain"],
+      "additionalBranchPrefix": "release-",
+      "semanticCommitType": "fix"
+    }
   ]
 }
