@@ -376,6 +376,57 @@ fn tui_draws_documents_text_first_and_metadata_low() {
 }
 
 #[test]
+fn tui_keeps_global_selection_and_scroll_offset_when_jumping_and_resizing() {
+    let snapshot = DashboardSnapshot {
+        project: json!({}),
+        documents: (1..=80)
+            .map(|id| DocumentSummary {
+                id,
+                title: format!("Document {id:03}"),
+                created: "2024-01-01".to_string(),
+            })
+            .collect(),
+        latest_task: None,
+        security: vec![],
+    };
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    let mut app = TuiApp::from_snapshot(snapshot);
+    app.loading_documents = false;
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+    assert!(app.select_last());
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    assert_eq!(app.current_document_id(), Some(80));
+    assert_eq!(app.documents_state.selected(), Some(79));
+    assert_eq!(
+        app.documents_state.offset(),
+        80 - app.documents_viewport_height
+    );
+
+    terminal.backend_mut().resize(100, 20);
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    assert_eq!(
+        app.documents_state.offset(),
+        80 - app.documents_viewport_height
+    );
+    let visible_content = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(visible_content.contains("▶ "));
+    assert!(visible_content.contains("Document 080"));
+    assert!(!visible_content.contains("Document 001"));
+
+    assert!(app.select_next());
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    assert_eq!(app.current_document_id(), Some(1));
+    assert_eq!(app.documents_state.offset(), 0);
+}
+
+#[test]
 fn security_reviewer_uses_gpt_54_and_polls_findings() {
     let profile = SecurityAgentProfile::security_reviewer();
     assert_eq!(profile.model, "gpt-5.4");
