@@ -424,28 +424,30 @@ impl<T: Transport> ApiClient<T> {
 
             let response = self.transport.send(request)?;
             check_response(&response)?;
-            let current_url = response.url.clone();
-            let value = parse_json_body(&response)?;
-            if let Some(items) = value.as_array() {
-                results.extend(items.iter().take(limit - results.len()).cloned());
-                break;
-            }
-
-            let response_object = value.as_object().ok_or_else(|| {
-                AppError::Message("Paginated response must be an object or list".to_string())
-            })?;
-
-            if let Some(items) = response_object.get("results").and_then(Value::as_array) {
-                results.extend(items.iter().take(limit - results.len()).cloned());
+            let remaining = limit - results.len();
+            let mut page = match parse_json_body(&response)? {
+                Value::Array(items) => {
+                    results.extend(items.into_iter().take(remaining));
+                    break;
+                }
+                Value::Object(page) => page,
+                _ => {
+                    return Err(AppError::Message(
+                        "Paginated response must be an object or list".to_string(),
+                    ))
+                }
+            };
+            if let Some(Value::Array(items)) = page.remove("results") {
+                results.extend(items.into_iter().take(remaining));
             }
             if results.len() == limit {
                 break;
             }
 
-            next = response_object
+            next = page
                 .get("next")
                 .and_then(Value::as_str)
-                .map(|url| validate_next_page_url(&current_url, url))
+                .map(|url| validate_next_page_url(&response.url, url))
                 .transpose()?
                 .map(Endpoint::Absolute);
         }

@@ -469,6 +469,38 @@ fn tui_keeps_global_selection_and_scroll_offset_when_jumping_and_resizing() {
 }
 
 #[test]
+fn inspector_retains_its_scroll_when_the_terminal_is_temporarily_too_narrow() {
+    let mut app = TuiApp::from_snapshot(DashboardSnapshot {
+        project: json!({}),
+        documents: vec![DocumentSummary {
+            id: 1,
+            title: "Invoice".to_string(),
+            created: "2026-01-11".to_string(),
+        }],
+        latest_task: None,
+        security: vec![],
+    });
+    app.on_inspector_loaded(
+        1,
+        DocumentInspector {
+            id: 1,
+            title: "Invoice".to_string(),
+            text: "abcdefghij\n".repeat(80),
+            metadata: vec![],
+        },
+    );
+    app.inspector_scroll = 38;
+    let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    terminal.backend_mut().resize(2, 30);
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    assert_eq!(app.inspector_scroll, 38);
+    terminal.backend_mut().resize(80, 30);
+    terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+    assert_eq!(app.inspector_scroll, 38);
+}
+
+#[test]
 fn security_reviewer_uses_gpt_54_and_polls_findings() {
     let profile = SecurityAgentProfile::security_reviewer();
     assert_eq!(profile.model, "gpt-5.4");

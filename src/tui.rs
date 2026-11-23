@@ -1,3 +1,6 @@
+mod inspector_layout;
+
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -19,6 +22,7 @@ use ratatui::widgets::{
 use ratatui::{Frame, Terminal};
 use serde_json::Value;
 
+use self::inspector_layout::InspectorLayout;
 use crate::api::{ApiClient, Transport};
 use crate::config::AppConfig;
 use crate::error::AppError;
@@ -60,6 +64,8 @@ pub struct TuiApp {
     pub documents_viewport_height: usize,
     pub inspector_scroll: usize,
     pub inspector_viewport_height: usize,
+    inspector_viewport_width: u16,
+    inspector_layout: InspectorLayout,
     pub focus: PaneFocus,
     pending_inspector_id: Option<u64>,
     failed_inspector_id: Option<u64>,
@@ -119,6 +125,8 @@ impl TuiApp {
             documents_viewport_height: 1,
             inspector_scroll: 0,
             inspector_viewport_height: 1,
+            inspector_viewport_width: 0,
+            inspector_layout: InspectorLayout::default(),
             focus: PaneFocus::Documents,
             pending_inspector_id: None,
             failed_inspector_id: None,
@@ -144,13 +152,11 @@ impl TuiApp {
 
     #[must_use]
     pub fn current_inspector(&self) -> Option<&DocumentInspector> {
-        let document_id = self.current_document_id()?;
-        self.inspector_cache.get(&document_id).or_else(|| {
-            self.uncached_inspector
-                .as_ref()
-                .filter(|(id, _)| *id == document_id)
-                .map(|(_, inspector)| inspector)
-        })
+        find_inspector(
+            &self.inspector_cache,
+            self.uncached_inspector.as_ref(),
+            self.current_document_id()?,
+        )
     }
 
     #[must_use]
@@ -226,6 +232,7 @@ impl TuiApp {
             self.pending_inspector_id = None;
             self.failed_inspector_id = None;
             self.inspector_scroll = 0;
+            self.inspector_layout.reset();
             self.uncached_inspector = None;
         }
         let bytes = inspector_size(&inspector);
@@ -313,6 +320,7 @@ impl TuiApp {
         self.selected_document = 0;
         self.documents_state.select(None);
         self.inspector_scroll = 0;
+        self.inspector_layout.reset();
         self.pending_inspector_id = None;
         self.failed_inspector_id = None;
         self.loading_inspector = false;
@@ -409,6 +417,7 @@ impl TuiApp {
             self.pending_inspector_id = None;
             self.failed_inspector_id = None;
             self.uncached_inspector = None;
+            self.inspector_layout.reset();
             self.loading_inspector = false;
         }
         self.selected_document = index;
@@ -429,12 +438,7 @@ impl TuiApp {
     }
 
     pub fn scroll_inspector_down(&mut self) -> bool {
-        let max_scroll = self.max_inspector_scroll();
-        if self.inspector_scroll >= max_scroll {
-            return false;
-        }
-        self.inspector_scroll = (self.inspector_scroll + 1).min(max_scroll);
-        true
+        self.scroll_inspector_to(self.inspector_scroll.saturating_add(1))
     }
 
     pub const fn scroll_inspector_up(&mut self) -> bool {
@@ -446,13 +450,8 @@ impl TuiApp {
     }
 
     pub fn scroll_inspector_page_down(&mut self) -> bool {
-        let max_scroll = self.max_inspector_scroll();
-        if self.inspector_scroll >= max_scroll {
-            return false;
-        }
         let page = self.inspector_viewport_height.max(1);
-        self.inspector_scroll = (self.inspector_scroll + page).min(max_scroll);
-        true
+        self.scroll_inspector_to(self.inspector_scroll.saturating_add(page))
     }
 
     pub fn scroll_inspector_page_up(&mut self) -> bool {
@@ -473,20 +472,63 @@ impl TuiApp {
     }
 
     pub fn scroll_inspector_bottom(&mut self) -> bool {
-        let max_scroll = self.max_inspector_scroll();
-        if self.inspector_scroll == max_scroll {
-            return false;
-        }
-        self.inspector_scroll = max_scroll;
-        true
+        self.scroll_inspector_to(usize::MAX)
     }
 
-    fn max_inspector_scroll(&self) -> usize {
-        let line_count = self
-            .current_inspector()
-            .map_or(1, |inspector| inspector.text.lines().count());
-        line_count.saturating_sub(self.inspector_viewport_height.max(1))
+    fn scroll_inspector_to(&mut self, scroll: usize) -> bool {
+        let next = self.clamped_inspector_scroll(scroll);
+        let changed = self.inspector_scroll != next;
+        self.inspector_scroll = next;
+        changed
     }
+
+    fn clamped_inspector_scroll(&mut self, scroll: usize) -> usize {
+        if self.inspector_viewport_width == 0 || self.inspector_viewport_height == 0 {
+            return self.inspector_scroll;
+        }
+        let Some(document_id) = self.current_document_id() else {
+            return 0;
+        };
+        let Some(inspector) = find_inspector(
+            &self.inspector_cache,
+            self.uncached_inspector.as_ref(),
+            document_id,
+        ) else {
+            return 0;
+        };
+        self.inspector_layout.clamp_scroll(
+            &inspector.text,
+            self.inspector_viewport_width,
+            scroll,
+            self.inspector_viewport_height.max(1),
+        )
+    }
+
+    fn inspector_window(&mut self) -> Option<(Cow<'_, str>, u16)> {
+        let inspector = find_inspector(
+            &self.inspector_cache,
+            self.uncached_inspector.as_ref(),
+            self.current_document_id()?,
+        )?;
+        Some(self.inspector_layout.visible(
+            &inspector.text,
+            self.inspector_viewport_width,
+            self.inspector_scroll,
+            self.inspector_viewport_height,
+        ))
+    }
+}
+
+fn find_inspector<'a>(
+    cached: &'a HashMap<u64, DocumentInspector>,
+    uncached: Option<&'a (u64, DocumentInspector)>,
+    document_id: u64,
+) -> Option<&'a DocumentInspector> {
+    cached.get(&document_id).or_else(|| {
+        uncached
+            .filter(|(id, _)| *id == document_id)
+            .map(|(_, inspector)| inspector)
+    })
 }
 
 pub fn run_tui<T: Transport + Clone + Send + 'static>(
@@ -1008,29 +1050,32 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     } else {
         "Inspector"
     };
-    app.inspector_viewport_height = usize::from(inspector_area.height.saturating_sub(2));
-    let inspector_body = if let Some(inspector) = app.current_inspector() {
-        inspector.text.as_str()
-    } else if app.loading_documents {
+    let inspector_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if app.focus == PaneFocus::Inspector {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        })
+        .title(inspector_title);
+    let text_area = inspector_block.inner(inspector_area);
+    app.inspector_viewport_height = usize::from(text_area.height);
+    app.inspector_viewport_width = text_area.width;
+    app.inspector_scroll = app.clamped_inspector_scroll(app.inspector_scroll);
+    let placeholder = if app.loading_documents {
         "Loading document list…"
     } else if app.documents.is_empty() {
         "No document selected."
     } else {
         "Loading document text…"
     };
+    let (inspector_body, scroll) = app
+        .inspector_window()
+        .unwrap_or((Cow::Borrowed(placeholder), 0));
     let detail = Paragraph::new(inspector_body)
-        .scroll((u16::try_from(app.inspector_scroll).unwrap_or(u16::MAX), 0))
+        .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(if app.focus == PaneFocus::Inspector {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                })
-                .title(inspector_title),
-        );
+        .block(inspector_block);
     frame.render_widget(detail, inspector_area);
 
     let metadata = Paragraph::new(

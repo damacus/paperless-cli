@@ -40,7 +40,7 @@
     )
 )]
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufWriter, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
@@ -912,11 +912,7 @@ fn run_command(
         },
     };
 
-    let rendered = render_output(output, &envelope)?;
-    if !quiet || !suppressible_command(&envelope.command, output) {
-        println!("{rendered}");
-    }
-    Ok(())
+    emit_output(output, &envelope, quiet)
 }
 
 fn run_demo_command(
@@ -1297,9 +1293,20 @@ fn run_demo_command(
         },
     };
 
-    let rendered = render_output(output, &envelope)?;
-    if !quiet || !suppressible_command(&envelope.command, output) {
-        println!("{rendered}");
+    emit_output(output, &envelope, quiet)
+}
+
+fn emit_output(output: OutputMode, envelope: &OutputEnvelope, quiet: bool) -> Result<(), AppError> {
+    if quiet && suppressible_command(&envelope.command, output) {
+        return Ok(());
+    }
+    if output == OutputMode::Json {
+        let mut writer = BufWriter::with_capacity(128 * 1024, io::stdout().lock());
+        serde_json::to_writer_pretty(&mut writer, envelope)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+    } else {
+        println!("{}", render_output(output, envelope)?);
     }
     Ok(())
 }
