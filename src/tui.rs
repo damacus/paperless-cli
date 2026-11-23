@@ -51,8 +51,8 @@ pub struct TuiApp {
     pub documents: Vec<DocumentSummary>,
     pub selected_document: usize,
     pub documents_state: ListState,
-    /// Entries loaded by the browser use `on_inspector_loaded` for cache accounting.
-    /// Direct inserts by library callers are managed by those callers.
+    /// Use `on_inspector_loaded` when replacing text to update cache accounting
+    /// and invalidate the inspector layout.
     pub inspector_cache: HashMap<u64, DocumentInspector>,
     pub loading_documents: bool,
     pub loading_inspector: bool,
@@ -64,7 +64,7 @@ pub struct TuiApp {
     pub documents_viewport_height: usize,
     pub inspector_scroll: usize,
     pub inspector_viewport_height: usize,
-    inspector_viewport_width: u16,
+    inspector_viewport_width: Option<u16>,
     inspector_layout: InspectorLayout,
     pub focus: PaneFocus,
     pending_inspector_id: Option<u64>,
@@ -125,7 +125,7 @@ impl TuiApp {
             documents_viewport_height: 1,
             inspector_scroll: 0,
             inspector_viewport_height: 1,
-            inspector_viewport_width: 0,
+            inspector_viewport_width: None,
             inspector_layout: InspectorLayout::default(),
             focus: PaneFocus::Documents,
             pending_inspector_id: None,
@@ -483,7 +483,13 @@ impl TuiApp {
     }
 
     fn clamped_inspector_scroll(&mut self, scroll: usize) -> usize {
-        if self.inspector_viewport_width == 0 || self.inspector_viewport_height == 0 {
+        let page = self.inspector_viewport_height.max(1);
+        let Some(width) = self.inspector_viewport_width else {
+            return self.current_inspector().map_or(0, |inspector| {
+                scroll.min(inspector.text.lines().count().saturating_sub(page))
+            });
+        };
+        if width == 0 || self.inspector_viewport_height == 0 {
             return self.inspector_scroll;
         }
         let Some(document_id) = self.current_document_id() else {
@@ -496,12 +502,8 @@ impl TuiApp {
         ) else {
             return 0;
         };
-        self.inspector_layout.clamp_scroll(
-            &inspector.text,
-            self.inspector_viewport_width,
-            scroll,
-            self.inspector_viewport_height.max(1),
-        )
+        self.inspector_layout
+            .clamp_scroll(&inspector.text, width, scroll, page)
     }
 
     fn inspector_window(&mut self) -> Option<(Cow<'_, str>, u16)> {
@@ -512,7 +514,7 @@ impl TuiApp {
         )?;
         Some(self.inspector_layout.visible(
             &inspector.text,
-            self.inspector_viewport_width,
+            self.inspector_viewport_width?,
             self.inspector_scroll,
             self.inspector_viewport_height,
         ))
@@ -1060,7 +1062,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
         .title(inspector_title);
     let text_area = inspector_block.inner(inspector_area);
     app.inspector_viewport_height = usize::from(text_area.height);
-    app.inspector_viewport_width = text_area.width;
+    app.inspector_viewport_width = Some(text_area.width);
     app.inspector_scroll = app.clamped_inspector_scroll(app.inspector_scroll);
     let placeholder = if app.loading_documents {
         "Loading document list…"
@@ -1287,6 +1289,18 @@ mod loader_tests {
         app.on_inspector_loaded(1, inspector(1, 200));
         assert_eq!(app.inspector_scroll, 5);
         assert_eq!(app.current_inspector().map(|value| value.id), Some(2));
+    }
+
+    #[test]
+    fn inspector_navigation_works_before_the_first_draw() {
+        let mut app = test_app(1);
+        let mut loaded = inspector(1, 100);
+        loaded.text = "first\nsecond\nthird".to_string();
+        app.on_inspector_loaded(1, loaded);
+        assert!(app.scroll_inspector_down());
+        assert_eq!(app.inspector_scroll, 1);
+        assert!(app.scroll_inspector_bottom());
+        assert_eq!(app.inspector_scroll, 2);
     }
 
     #[test]
