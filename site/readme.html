@@ -35,7 +35,9 @@ paperless --demo
 paperless --output markdown document list --query "invoice 2024"
 paperless --output json search query "invoice acme"</code></pre>
           <h2>TUI and demo mode</h2>
-          <p>The default interface is a two-pane TUI with a scrolling document list on the left and a text inspector on the right. Use <code>Tab</code> to switch focus between panes, <code>j/k</code> or the arrow keys to move, <code>PgUp/PgDn</code> to page, <code>g/G</code> to jump, and <code>r</code> to reload.</p>
+          <p>The two-pane browser opens while it checks the connection. After connecting, it loads documents page by page and fetches the latest task separately. A task permission error appears in the Status pane while document browsing remains available.</p>
+          <p>Use <code>Tab</code> to switch panes, <code>j/k</code> or the arrow keys to move, <code>PgUp/PgDn</code> to page, <code>g/G</code> to jump to the top or bottom, and <code>q</code> to quit. Press <code>r</code> to reload documents and the latest task and clear the Inspector cache.</p>
+          <p>The Inspector keeps up to 16 MiB of recently fetched entries for back navigation. It displays larger documents while they are selected.</p>
           <p>For quick design and interaction feedback, run <code>paperless --demo</code>. Demo mode avoids real Paperless data and serves a built-in generic fixture dataset to both the CLI and the TUI.</p>
           <figure class="shot">
             <img src="assets/demo-tui.png" alt="paperless-cli demo mode showing the documents list, inspector pane, and status area">
@@ -51,8 +53,9 @@ paperless --output json search query "invoice acme"</code></pre>
             <li><code>tag</code>: <code>list</code>, <code>get</code>, <code>create</code>, <code>edit</code>, <code>delete</code></li>
           </ul>
           <h2>Network behavior</h2>
-          <p><code>paperless status</code> is a compact health and authentication probe that sends only <code>GET /api/status/</code>. Its default terminal view uses ASCII formatting to summarize component health, versions, migrations, and storage; <code>--output json</code> preserves the complete API response for scripts.</p>
-          <p><code>paperless dashboard</code> is the explicit full operational overview. It sends requests to <code>/api/status/</code>, <code>/api/statistics/</code>, and <code>/api/tasks/</code>.</p>
+          <p><code>paperless status</code> checks health and authentication with <code>GET /api/status/</code>. If the server returns HTTP 403, it tries <code>GET /api/documents/?page_size=1</code> to check access. When the status endpoint is available, the terminal view shows component health, versions, migrations and storage. <code>--output json</code> includes the response from the successful probe.</p>
+          <p><code>paperless dashboard</code> loads the full operational overview. It checks status and requests statistics and the complete task list concurrently.</p>
+          <p>Document downloads and bulk ZIP exports move into place after the response completes. An interrupted transfer preserves any existing destination file. New downloads on Unix use owner-only permissions.</p>
           <p>All help paths are local and network-free.</p>
           <h2>Compatibility</h2>
           <ul>

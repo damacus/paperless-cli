@@ -20,6 +20,7 @@ shifting the architecture to a Rust TUI and agent-friendly outputs.
 - document query parameter construction
 - HTTP error mapping
 - pagination through `next` URLs
+- concurrent dashboard reads
 - multipart upload request construction
 - filename sanitization on download
 
@@ -29,8 +30,11 @@ shifting the architecture to a Rust TUI and agent-friendly outputs.
 
 - markdown output shape
 - JSON envelope shape
-- core TUI rendering on a `TestBackend`
+- core TUI rendering and scroll retention on resize with a `TestBackend`
 - security reviewer polling behavior and the `gpt-5.4` model requirement
+
+Unit tests in `src/tui/inspector_layout.rs` cover wrapping and long-line
+scrolling using a Ratatui buffer.
 
 ### CLI behavior
 
@@ -40,7 +44,9 @@ shifting the architecture to a Rust TUI and agent-friendly outputs.
 - network-free top-level and subcommand help paths
 - missing-config failure for document commands
 - graceful status behavior when nothing is configured
-- single-endpoint status behavior and explicit multi-endpoint dashboard behavior
+- status requests and the HTTP 403 fallback used by the dashboard
+- complete dashboard task pagination
+- streamed multipart uploads and recovery from interrupted downloads
 - `config set-url` and `config set-token`
 - `document content`
 - `pdf read` and `pdf info`
