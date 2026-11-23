@@ -45,6 +45,8 @@ pub struct TuiApp {
     pub documents: Vec<DocumentSummary>,
     pub selected_document: usize,
     pub documents_state: ListState,
+    /// Entries loaded by the browser use `on_inspector_loaded` for cache accounting.
+    /// Direct inserts by library callers are managed by those callers.
     pub inspector_cache: HashMap<u64, DocumentInspector>,
     pub loading_documents: bool,
     pub loading_inspector: bool,
@@ -58,6 +60,8 @@ pub struct TuiApp {
     pub inspector_viewport_height: usize,
     pub focus: PaneFocus,
     pending_inspector_id: Option<u64>,
+    failed_inspector_id: Option<u64>,
+    // Keep fetch order so allocation and eviction do not scan the cache on a hit.
     inspector_order: VecDeque<u64>,
     inspector_bytes: usize,
     uncached_inspector: Option<(u64, DocumentInspector)>,
@@ -114,6 +118,7 @@ impl TuiApp {
             inspector_viewport_height: 1,
             focus: PaneFocus::Documents,
             pending_inspector_id: None,
+            failed_inspector_id: None,
             inspector_order: VecDeque::new(),
             inspector_bytes: 0,
             uncached_inspector: None,
@@ -213,6 +218,7 @@ impl TuiApp {
         if selected == Some(document_id) {
             self.loading_inspector = false;
             self.pending_inspector_id = None;
+            self.failed_inspector_id = None;
             self.inspector_scroll = 0;
             self.uncached_inspector = None;
         }
@@ -281,6 +287,16 @@ impl TuiApp {
         }
     }
 
+    fn on_inspector_error(&mut self, document_id: u64, error: String) {
+        if self.current_document_id() == Some(document_id) {
+            self.loading_inspector = false;
+            self.pending_inspector_id = None;
+            // Moving to another document or reloading may retry this request.
+            self.failed_inspector_id = Some(document_id);
+            self.project_summary = format!("error {error}");
+        }
+    }
+
     pub fn request_documents_reload(&mut self) {
         self.loading_documents = true;
         self.documents.clear();
@@ -290,6 +306,7 @@ impl TuiApp {
         self.documents_state.select(None);
         self.inspector_scroll = 0;
         self.pending_inspector_id = None;
+        self.failed_inspector_id = None;
         self.loading_inspector = false;
         self.inspector_cache.clear();
         self.inspector_order.clear();
@@ -300,6 +317,9 @@ impl TuiApp {
     pub fn maybe_request_inspector(&mut self) -> Option<u64> {
         let document_id = self.current_document_id()?;
         if self.current_inspector().is_some() || self.pending_inspector_id == Some(document_id) {
+            return None;
+        }
+        if self.failed_inspector_id == Some(document_id) {
             return None;
         }
 
@@ -379,6 +399,7 @@ impl TuiApp {
     fn set_selected_document(&mut self, index: usize) {
         if index != self.selected_document {
             self.pending_inspector_id = None;
+            self.failed_inspector_id = None;
             self.uncached_inspector = None;
             self.loading_inspector = false;
         }
@@ -596,11 +617,7 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     if loaded_generation == generation {
                         match result {
                             Ok(inspector) => app.on_inspector_loaded(document_id, inspector),
-                            Err(error) if app.current_document_id() == Some(document_id) => {
-                                app.loading_inspector = false;
-                                app.project_summary = format!("error {error}");
-                            }
-                            Err(_) => {}
+                            Err(error) => app.on_inspector_error(document_id, error),
                         }
                     }
                     request_selected_inspector(
@@ -815,6 +832,9 @@ fn request_selected_inspector<T: Transport + Clone + Send + 'static>(
     let Some(document_id) = app.current_document_id() else {
         return;
     };
+    if app.failed_inspector_id == Some(document_id) {
+        return;
+    }
     if app.current_inspector().is_some() {
         app.loading_inspector = false;
     } else if active.contains(&(generation, document_id)) {
@@ -1217,6 +1237,20 @@ mod loader_tests {
         app.on_inspector_loaded(1, inspector(1, 200));
         assert_eq!(app.inspector_scroll, 5);
         assert_eq!(app.current_inspector().map(|value| value.id), Some(2));
+    }
+
+    #[test]
+    fn a_failed_inspector_can_retry_when_the_user_returns_to_it() {
+        let mut app = test_app(2);
+        assert_eq!(app.maybe_request_inspector(), Some(1));
+        app.on_inspector_error(1, "HTTP 403 Forbidden".to_string());
+        assert_eq!(app.pending_inspector_id, None);
+        assert!(!app.loading_inspector);
+        assert_eq!(app.maybe_request_inspector(), None);
+
+        assert!(app.select_next());
+        assert!(app.select_previous());
+        assert_eq!(app.maybe_request_inspector(), Some(1));
     }
 
     #[test]
