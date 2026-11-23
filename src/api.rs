@@ -283,7 +283,16 @@ impl<T: Transport> ApiClient<T> {
     pub fn paginate(
         &self,
         path: &str,
+        query: Vec<(String, String)>,
+    ) -> Result<Vec<Value>, AppError> {
+        self.paginate_up_to(path, query, usize::MAX)
+    }
+
+    pub(crate) fn paginate_up_to(
+        &self,
+        path: &str,
         mut query: Vec<(String, String)>,
+        limit: usize,
     ) -> Result<Vec<Value>, AppError> {
         if !query.iter().any(|(key, _)| key == "page_size") {
             query.push(("page_size".to_string(), "100".to_string()));
@@ -293,7 +302,7 @@ impl<T: Transport> ApiClient<T> {
         let mut params = query;
         let mut results = Vec::new();
 
-        while let Some(endpoint) = next.take() {
+        while let Some(endpoint) = next.take().filter(|_| results.len() < limit) {
             let mut request = match endpoint {
                 Endpoint::Relative(path) => RequestData::new(HttpMethod::Get, path),
                 Endpoint::Absolute(url) => RequestData::absolute(HttpMethod::Get, url),
@@ -305,7 +314,7 @@ impl<T: Transport> ApiClient<T> {
             let current_url = response.url.clone();
             let value = parse_json_body(&response)?;
             if let Some(items) = value.as_array() {
-                results.extend(items.iter().cloned());
+                results.extend(items.iter().take(limit - results.len()).cloned());
                 break;
             }
 
@@ -314,7 +323,10 @@ impl<T: Transport> ApiClient<T> {
             })?;
 
             if let Some(items) = response_object.get("results").and_then(Value::as_array) {
-                results.extend(items.iter().cloned());
+                results.extend(items.iter().take(limit - results.len()).cloned());
+            }
+            if results.len() == limit {
+                break;
             }
 
             next = response_object

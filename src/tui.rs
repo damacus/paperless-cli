@@ -21,8 +21,8 @@ use crate::api::{ApiClient, Transport};
 use crate::error::AppError;
 use crate::security::{SecurityFinding, Severity};
 use crate::services::{
-    document_summaries_from_response, get_document_inspector, latest_task_summary, list_documents,
-    list_tasks, next_page_url_from_response, DashboardSnapshot, DocumentInspector, DocumentQuery,
+    document_summaries_from_response, fetch_latest_task, get_document_inspector, list_documents,
+    next_page_url_from_response, DashboardSnapshot, DocumentInspector, DocumentQuery,
     DocumentSummary, TaskSummary,
 };
 
@@ -388,7 +388,6 @@ pub fn run_tui<T: Transport + Clone + Send + 'static>(
     let (event_sender, event_receiver) = mpsc::channel();
 
     spawn_documents_loader(client.clone(), event_sender.clone());
-    spawn_latest_task_loader(client.clone(), event_sender.clone());
 
     let result = run_event_loop(
         &mut terminal,
@@ -564,9 +563,7 @@ fn spawn_latest_task_loader<T: Transport + Clone + Send + 'static>(
     event_sender: Sender<TuiEvent>,
 ) {
     std::thread::spawn(move || {
-        let result = list_tasks(&client)
-            .map(|tasks| latest_task_summary(&tasks))
-            .map_err(|error| error.to_string());
+        let result = fetch_latest_task(&client).map_err(|error| error.to_string());
         let _ = event_sender.send(TuiEvent::LatestTask(result));
     });
 }
