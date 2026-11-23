@@ -37,7 +37,6 @@ The crate metadata in `Cargo.toml` now includes:
 - `description`
 - `license`
 - `repository`
-- `homepage`
 - `readme`
 - `keywords`
 - `categories`

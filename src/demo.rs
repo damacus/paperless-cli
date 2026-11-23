@@ -12,7 +12,8 @@ const DEMO_BASE_URL: &str = "https://demo.paperless.local";
 pub struct DemoTransport;
 
 impl DemoTransport {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
@@ -41,9 +42,13 @@ impl Transport for DemoTransport {
     }
 }
 
+#[must_use]
 pub fn demo_config(output: OutputMode) -> AppConfig {
-    AppConfig::new(DEMO_BASE_URL, "demo-token-value", output)
-        .expect("demo config should always be valid")
+    AppConfig {
+        base_url: DEMO_BASE_URL.to_string(),
+        token: "demo-token-value".to_string(),
+        preferred_output: output,
+    }
 }
 
 fn dispatch_demo_request(
@@ -92,43 +97,41 @@ fn dispatch_demo_request(
                 "demo": true,
             }),
         ),
-        (HttpMethod::Patch, ["documents", id]) | (HttpMethod::Put, ["documents", id]) => {
-            patch_document(id, json_body)
+        (HttpMethod::Patch | HttpMethod::Put, ["documents", id]) => patch_document(id, json_body),
+        (HttpMethod::Delete, ["documents" | "tags" | "correspondents" | "document_types", _id]) => {
+            Ok(empty_response(normalized))
         }
-        (HttpMethod::Delete, ["documents", _id]) => empty_response(normalized),
         (HttpMethod::Get, ["tags"]) => ok_json(normalized, Value::Array(demo_tags())),
         (HttpMethod::Get, ["tags", id]) => item_detail(id, demo_tags(), normalized),
         (HttpMethod::Post, ["tags"]) => create_tag_response(json_body),
         (HttpMethod::Patch, ["tags", id]) => {
             patch_named_item(id, demo_tags(), normalized, json_body)
         }
-        (HttpMethod::Delete, ["tags", _id]) => empty_response(normalized),
         (HttpMethod::Get, ["correspondents"]) => {
             ok_json(normalized, Value::Array(demo_correspondents()))
         }
         (HttpMethod::Get, ["correspondents", id]) => {
             item_detail(id, demo_correspondents(), normalized)
         }
-        (HttpMethod::Post, ["correspondents"]) => create_named_matcher(normalized, json_body),
-        (HttpMethod::Delete, ["correspondents", _id]) => empty_response(normalized),
+        (HttpMethod::Post, ["correspondents" | "document_types"]) => {
+            create_named_matcher(normalized, json_body)
+        }
         (HttpMethod::Get, ["document_types"]) => {
             ok_json(normalized, Value::Array(demo_document_types()))
         }
         (HttpMethod::Get, ["document_types", id]) => {
             item_detail(id, demo_document_types(), normalized)
         }
-        (HttpMethod::Post, ["document_types"]) => create_named_matcher(normalized, json_body),
-        (HttpMethod::Delete, ["document_types", _id]) => empty_response(normalized),
         (HttpMethod::Get, ["tasks"]) => ok_json(normalized, Value::Array(demo_tasks())),
         (HttpMethod::Get, ["tasks", id]) => item_detail(id, demo_tasks(), normalized),
         (HttpMethod::Get, ["search"]) => search_documents(query),
         (HttpMethod::Get, ["search", "autocomplete"]) => autocomplete(query),
-        (HttpMethod::Post, ["documents", "bulk_download"]) => ok_binary(
+        (HttpMethod::Post, ["documents", "bulk_download"]) => Ok(ok_binary(
             normalized,
             vec![0x50, 0x4b, 0x03, 0x04, b'D', b'E', b'M', b'O'],
             "application/zip",
             Some("attachment; filename=\"paperless-demo-export.zip\"".to_string()),
-        ),
+        )),
         _ => Err(AppError::Http {
             status: 404,
             url: demo_url(normalized),
@@ -147,13 +150,9 @@ fn paginated_documents(query: &[(String, String)]) -> Result<ResponseData, AppEr
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(25)
         .max(1);
-    let start = (page - 1) * page_size;
-    let end = (start + page_size).min(all.len());
-    let items = if start < all.len() {
-        all[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
+    let start = (page - 1).saturating_mul(page_size);
+    let end = start.saturating_add(page_size).min(all.len());
+    let items = all.get(start..end).unwrap_or_default().to_vec();
     let next = (end < all.len()).then(|| {
         format!(
             "{}/api/documents/?page={}&page_size={}",
@@ -211,12 +210,12 @@ fn document_binary(id: &str, asset: &str, mime: &str) -> Result<ResponseData, Ap
     } else {
         b"%PDF-1.4\n% DEMO\n".to_vec()
     };
-    ok_binary(
+    Ok(ok_binary(
         &format!("documents/{id}/{asset}/"),
         bytes,
         mime,
         Some(format!("attachment; filename=\"{filename}\"")),
-    )
+    ))
 }
 
 fn patch_document(id: &str, json_body: Option<Value>) -> Result<ResponseData, AppError> {
@@ -230,10 +229,8 @@ fn patch_document(id: &str, json_body: Option<Value>) -> Result<ResponseData, Ap
             message: "Resource not found.".to_string(),
         })?;
 
-    if let Some(Value::Object(patch)) = json_body {
-        for (key, value) in patch {
-            document[key] = value;
-        }
+    if let (Some(document), Some(Value::Object(patch))) = (document.as_object_mut(), json_body) {
+        document.extend(patch);
     }
 
     ok_json(&format!("documents/{id}/"), document)
@@ -281,10 +278,8 @@ fn patch_named_item(
             url: demo_url(path),
             message: "Resource not found.".to_string(),
         })?;
-    if let Some(Value::Object(patch)) = json_body {
-        for (key, value) in patch {
-            item[key] = value;
-        }
+    if let (Some(item), Some(Value::Object(patch))) = (item.as_object_mut(), json_body) {
+        item.extend(patch);
     }
     ok_json(path, item)
 }
@@ -368,6 +363,8 @@ fn autocomplete(query: &[(String, String)]) -> Result<ResponseData, AppError> {
     ok_json("search/autocomplete/", Value::Array(suggestions))
 }
 
+// Own the short-lived JSON fixtures supplied by demo endpoint handlers.
+#[allow(clippy::needless_pass_by_value)]
 fn ok_json(path: &str, body: Value) -> Result<ResponseData, AppError> {
     Ok(ResponseData {
         status: 200,
@@ -382,26 +379,26 @@ fn ok_binary(
     body: Vec<u8>,
     mime: &str,
     content_disposition: Option<String>,
-) -> Result<ResponseData, AppError> {
+) -> ResponseData {
     let mut headers = BTreeMap::from([("content-type".to_string(), mime.to_string())]);
     if let Some(value) = content_disposition {
         headers.insert("content-disposition".to_string(), value);
     }
-    Ok(ResponseData {
+    ResponseData {
         status: 200,
         url: demo_url(path),
         headers,
         body,
-    })
+    }
 }
 
-fn empty_response(path: &str) -> Result<ResponseData, AppError> {
-    Ok(ResponseData {
+fn empty_response(path: &str) -> ResponseData {
+    ResponseData {
         status: 204,
         url: demo_url(path),
         headers: BTreeMap::new(),
         body: Vec::new(),
-    })
+    }
 }
 
 fn demo_url(path: &str) -> String {

@@ -56,11 +56,13 @@ impl AppConfig {
         })
     }
 
+    #[must_use]
     pub fn api_url(&self, path: &str) -> String {
         let suffix = path.trim_start_matches('/');
         format!("{}/api/{}", self.base_url.trim_end_matches('/'), suffix)
     }
 
+    #[must_use]
     pub fn masked_token(&self) -> String {
         let total_chars = self.token.chars().count();
         if total_chars <= 8 {
@@ -99,26 +101,32 @@ pub struct AppPaths {
 }
 
 impl Default for AppPaths {
+    // Resolve configured paths here so non-Unicode OS paths stay usable.
+    #[allow(clippy::disallowed_methods)]
     fn default() -> Self {
         let config_root = std::env::var_os("PAPERLESS_CONFIG_PATH")
             .or_else(|| std::env::var_os("PAPERLESS_CLI_CONFIG_PATH"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                dirs::config_dir()
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join("paperless-cli")
-                    .join("config.toml")
-            });
+            .map_or_else(
+                || {
+                    dirs::config_dir()
+                        .unwrap_or_else(std::env::temp_dir)
+                        .join("paperless-cli")
+                        .join("config.toml")
+                },
+                PathBuf::from,
+            );
 
         let session_root = std::env::var_os("PAPERLESS_SESSION_PATH")
             .or_else(|| std::env::var_os("PAPERLESS_CLI_SESSION_PATH"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                dirs::state_dir()
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join("paperless-cli")
-                    .join("session.toml")
-            });
+            .map_or_else(
+                || {
+                    dirs::state_dir()
+                        .unwrap_or_else(std::env::temp_dir)
+                        .join("paperless-cli")
+                        .join("session.toml")
+                },
+                PathBuf::from,
+            );
 
         Self {
             config_path: config_root,
@@ -135,6 +143,7 @@ impl AppPaths {
         }
     }
 
+    #[must_use]
     pub fn config_permissions_restricted(&self) -> bool {
         restricted_permissions(&self.config_path)
     }
@@ -195,6 +204,7 @@ pub fn save_config(paths: &AppPaths, config: &AppConfig) -> Result<(), AppError>
     Ok(())
 }
 
+#[must_use]
 pub fn load_session(paths: &AppPaths) -> SessionState {
     let path = &paths.session_path;
     let Some(raw) = fs::read_to_string(path).ok() else {
@@ -248,7 +258,7 @@ fn restrict_permissions(path: &Path) -> Result<(), AppError> {
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
-    matches!(host, Some("localhost") | Some("127.0.0.1") | Some("::1"))
+    matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
 
 fn restricted_permissions(path: &Path) -> bool {
@@ -256,9 +266,11 @@ fn restricted_permissions(path: &Path) -> bool {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        fs::metadata(path)
-            .map(|metadata| metadata.permissions().mode() & 0o077 == 0)
-            .unwrap_or(false)
+        // Use the Unix group and other permission mask to express the check.
+        #[allow(clippy::verbose_bit_mask)]
+        let restricted =
+            fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o077 == 0);
+        restricted
     }
 
     #[cfg(not(unix))]
@@ -267,7 +279,10 @@ fn restricted_permissions(path: &Path) -> bool {
     }
 }
 
-fn env_value(name: &str) -> Option<String> {
+// Keep Paperless environment reads in the configuration module.
+#[must_use]
+#[allow(clippy::disallowed_methods)]
+pub fn env_value(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())

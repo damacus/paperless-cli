@@ -1,3 +1,45 @@
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::exit,
+    clippy::disallowed_methods,
+    clippy::dbg_macro,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unreachable,
+    clippy::undocumented_unsafe_blocks,
+    clippy::as_conversions
+)]
+#![allow(
+    // Transitive duplicate versions are outside our control.
+    clippy::multiple_crate_versions,
+    // Error behaviour is documented at module level, not via per-fn
+    // `# Errors` sections; the public surface is consumed internally.
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    // Function length is governed by cognitive-complexity, not lines.
+    clippy::too_many_lines,
+    // Licence/keyword metadata is a maintainer decision, not a lint.
+    clippy::cargo_common_metadata,
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::unreachable,
+        clippy::disallowed_methods,
+        clippy::future_not_send,
+    )
+)]
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -237,8 +279,8 @@ fn status_terminal_output_uses_ascii_art_and_aligned_columns() {
                 "pngx_version": "2.20.15",
                 "server_os": "Linux-aarch64",
                 "storage": {
-                    "available": 11047809318912_u64,
-                    "total": 11984892329984_u64
+                    "available": 11_047_809_318_912_u64,
+                    "total": 11_984_892_329_984_u64
                 },
                 "tasks": {
                     "celery_error": "Error connecting to celery, check logs for more detail.",
@@ -362,7 +404,7 @@ fn tui_draws_documents_text_first_and_metadata_low() {
     let contents = buffer
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     assert!(contents.contains("paperless-cli"));
     assert!(contents.contains("Documents"));
@@ -414,7 +456,7 @@ fn tui_keeps_global_selection_and_scroll_offset_when_jumping_and_resizing() {
         .buffer()
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     assert!(visible_content.contains("▶ "));
     assert!(visible_content.contains("Document 080"));
@@ -450,7 +492,10 @@ fn security_reviewer_uses_gpt_54_and_polls_findings() {
     state.lock().unwrap().base_url = Some("https://paperless.example.com".to_string());
     state.lock().unwrap().config_permissions_restricted = true;
     let cleaned = receiver.recv_timeout(Duration::from_millis(50)).unwrap();
-    assert!(cleaned.is_empty());
+    assert_eq!(
+        cleaned,
+        Vec::<paperless_cli::security::SecurityFinding>::new()
+    );
 }
 
 #[test]

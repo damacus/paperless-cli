@@ -1,11 +1,54 @@
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::exit,
+    clippy::disallowed_methods,
+    clippy::dbg_macro,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unreachable,
+    clippy::undocumented_unsafe_blocks,
+    clippy::as_conversions
+)]
+#![allow(
+    // Transitive duplicate versions are outside our control.
+    clippy::multiple_crate_versions,
+    // Error behaviour is documented at module level, not via per-fn
+    // `# Errors` sections; the public surface is consumed internally.
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    // Function length is governed by cognitive-complexity, not lines.
+    clippy::too_many_lines,
+    // Licence/keyword metadata is a maintainer decision, not a lint.
+    clippy::cargo_common_metadata,
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::unreachable,
+        clippy::disallowed_methods,
+        clippy::future_not_send,
+    )
+)]
+
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use paperless_cli::api::{ApiClient, ReqwestTransport};
-use paperless_cli::config::{load_config, save_config, AppConfig, AppPaths, OutputMode};
+use paperless_cli::config::{env_value, load_config, save_config, AppConfig, AppPaths, OutputMode};
 use paperless_cli::demo::{demo_config, DemoTransport};
 use paperless_cli::error::AppError;
 use paperless_cli::pdf::{read_local_pdf_info, read_local_pdf_text};
@@ -25,6 +68,8 @@ use paperless_cli::tui::run_connecting_tui;
 use serde_json::json;
 
 #[derive(Parser, Debug)]
+// These independent CLI switches can be set in any combination.
+#[allow(clippy::struct_excessive_bools)]
 #[command(
     name = "paperless",
     version,
@@ -338,10 +383,12 @@ struct PdfPathArgs {
     path: PathBuf,
 }
 
-fn main() {
+fn main() -> ExitCode {
     if let Err(error) = run() {
         eprintln!("{error}");
-        std::process::exit(1);
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -380,7 +427,12 @@ fn run_interactive(
         Duration::from_secs(5),
     );
     let shared_state = Arc::new(Mutex::new(audit_state(paths, Some(&config), None)));
-    let findings = auditor.review_once(&shared_state.lock().unwrap().clone());
+    let findings = {
+        let state = shared_state.lock().map_err(|_| {
+            AppError::Message("Security monitor lost access to shared state.".to_string())
+        })?;
+        auditor.review_once(&state)
+    };
     let receiver = auditor.spawn(shared_state);
     run_connecting_tui(client, config, findings, receiver)
 }
@@ -400,7 +452,7 @@ fn run_command(
     quiet: bool,
 ) -> Result<(), AppError> {
     let security_profile = SecurityAgentProfile::security_reviewer();
-    let auditor = SecurityAuditor::new(security_profile, Duration::from_secs(60));
+    let auditor = SecurityAuditor::new(security_profile, Duration::from_mins(1));
 
     let envelope = match command {
         RootCommand::Login(args) => login_envelope(args, output, paths, &auditor)?,
@@ -485,7 +537,7 @@ fn run_command(
                 DocumentsCommand::List(args) => {
                     let query = document_query_from_list_args(&args);
                     if let Some(search) = &query.query {
-                        session.last_query = search.clone();
+                        session.last_query.clone_from(search);
                     }
                     OutputEnvelope {
                         mode: output_name(output).to_string(),
@@ -628,7 +680,7 @@ fn run_command(
                     }
                 }
                 DocumentsCommand::Search(args) => {
-                    session.last_query = args.query.clone();
+                    session.last_query.clone_from(&args.query);
                     let query = document_query_from_search_args(&args);
                     OutputEnvelope {
                         mode: output_name(output).to_string(),
@@ -877,7 +929,7 @@ fn run_demo_command(
     let client = ApiClient::new(DemoTransport::new());
     let auditor = SecurityAuditor::new(
         SecurityAgentProfile::security_reviewer(),
-        Duration::from_secs(60),
+        Duration::from_mins(1),
     );
 
     let envelope = match command {
@@ -1318,7 +1370,7 @@ fn set_config_url(paths: &AppPaths, url: String) -> Result<AppConfig, AppError> 
     let token = existing
         .as_ref()
         .map(|config| config.token.clone())
-        .or_else(|| std::env::var("PAPERLESS_TOKEN").ok())
+        .or_else(|| env_value("PAPERLESS_TOKEN"))
         .filter(|value| !value.trim().is_empty());
     let token = match token {
         Some(token) => token,
@@ -1338,7 +1390,7 @@ fn set_config_token(paths: &AppPaths, token: String) -> Result<AppConfig, AppErr
     let url = existing
         .as_ref()
         .map(|config| config.base_url.clone())
-        .or_else(|| std::env::var("PAPERLESS_URL").ok())
+        .or_else(|| env_value("PAPERLESS_URL"))
         .filter(|value| !value.trim().is_empty());
     let url = match url {
         Some(url) => url,
@@ -1361,7 +1413,7 @@ fn login_envelope(
 ) -> Result<OutputEnvelope, AppError> {
     let login = resolve_login_args(args)?;
     let config = init_connection(
-        |config| ReqwestTransport::new(config.clone()).map(ApiClient::new),
+        |config| ReqwestTransport::new(config).map(ApiClient::new),
         paths,
         &login.url,
         login.token,
@@ -1382,7 +1434,7 @@ fn login_envelope(
     })
 }
 
-fn output_name(output: OutputMode) -> &'static str {
+const fn output_name(output: OutputMode) -> &'static str {
     match output {
         OutputMode::Json => "json",
         OutputMode::Markdown => "markdown",

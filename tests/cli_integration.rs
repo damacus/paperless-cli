@@ -1,3 +1,45 @@
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::exit,
+    clippy::disallowed_methods,
+    clippy::dbg_macro,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unreachable,
+    clippy::undocumented_unsafe_blocks,
+    clippy::as_conversions
+)]
+#![allow(
+    // Transitive duplicate versions are outside our control.
+    clippy::multiple_crate_versions,
+    // Error behaviour is documented at module level, not via per-fn
+    // `# Errors` sections; the public surface is consumed internally.
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    // Function length is governed by cognitive-complexity, not lines.
+    clippy::too_many_lines,
+    // Licence/keyword metadata is a maintainer decision, not a lint.
+    clippy::cargo_common_metadata,
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::unreachable,
+        clippy::disallowed_methods,
+        clippy::future_not_send,
+    )
+)]
+
 use std::fs;
 use std::process::Command;
 
@@ -123,7 +165,7 @@ fn status_only_calls_the_status_endpoint() {
         when.method(GET).path("/api/tasks/");
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"[]"#);
+            .body(r"[]");
     });
 
     let (_dir, config, session) = base_env();
@@ -236,7 +278,7 @@ fn dashboard_keeps_the_status_fallback_and_all_task_pages() {
         .args(["--json", "dashboard"])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{:?}", output);
+    assert!(output.status.success(), "{output:?}");
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["data"]["status"]["response"]["count"], 2);
     assert_eq!(output["data"]["statistics"]["documents_total"], 2);
@@ -613,7 +655,10 @@ fn demo_download_writes_fixture_file() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
         .collect::<Vec<_>>();
     assert_eq!(files.len(), 1);
-    assert!(files[0].ends_with(".pdf"));
+    assert_eq!(
+        std::path::Path::new(&files[0]).extension(),
+        Some(std::ffi::OsStr::new("pdf"))
+    );
 }
 
 fn write_fixture_pdf() -> std::path::PathBuf {

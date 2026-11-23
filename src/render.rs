@@ -94,6 +94,7 @@ pub fn render_output(mode: OutputMode, envelope: &OutputEnvelope) -> Result<Stri
     }
 }
 
+#[must_use]
 pub fn render_markdown(envelope: &OutputEnvelope) -> String {
     if matches!(
         envelope.command.as_str(),
@@ -105,13 +106,14 @@ pub fn render_markdown(envelope: &OutputEnvelope) -> String {
     }
 
     let mut lines =
-        if let Some(lines) = render_collection_terminal(&envelope.command, &envelope.data) {
-            lines
-        } else if envelope.command == "status" {
-            render_status_terminal(&envelope.data).unwrap_or_else(|| fallback_lines(&envelope.data))
-        } else {
-            fallback_lines(&envelope.data)
-        };
+        render_collection_terminal(&envelope.command, &envelope.data).unwrap_or_else(|| {
+            if envelope.command == "status" {
+                render_status_terminal(&envelope.data)
+                    .unwrap_or_else(|| fallback_lines(&envelope.data))
+            } else {
+                fallback_lines(&envelope.data)
+            }
+        });
 
     if !envelope.security.is_empty() {
         lines.push(String::new());
@@ -270,13 +272,13 @@ fn render_tabular_collection(
 
 fn collection_items(data: &Value) -> Option<(&[Value], u64)> {
     match data {
-        Value::Array(items) => Some((items, items.len() as u64)),
+        Value::Array(items) => Some((items, u64::try_from(items.len()).unwrap_or(u64::MAX))),
         Value::Object(object) => {
             let items = object.get("results")?.as_array()?;
             let total = object
                 .get("count")
                 .and_then(Value::as_u64)
-                .unwrap_or(items.len() as u64);
+                .unwrap_or_else(|| u64::try_from(items.len()).unwrap_or(u64::MAX));
             Some((items, total))
         }
         _ => None,
@@ -287,7 +289,7 @@ fn collection_summary(shown: usize, total: u64, singular: &str, plural: &str) ->
     if shown == 0 {
         return format!("No {plural} found.");
     }
-    if shown as u64 != total {
+    if usize::try_from(total).ok() != Some(shown) {
         return format!("{shown} shown of {total} {plural}");
     }
     if total == 1 {
@@ -348,7 +350,10 @@ fn render_text_row(cells: &[String], widths: &[usize]) -> String {
             if index + 1 == cells.len() {
                 cell.clone()
             } else {
-                format!("{cell:<width$}", width = widths[index])
+                format!(
+                    "{cell:<width$}",
+                    width = widths.get(index).copied().unwrap_or_default()
+                )
             }
         })
         .collect::<Vec<_>>()
@@ -503,11 +508,7 @@ fn render_status_terminal(data: &Value) -> Option<Vec<String>> {
             storage.get("available").and_then(Value::as_u64),
             storage.get("total").and_then(Value::as_u64),
         ) {
-            let percentage = if total == 0 {
-                String::new()
-            } else {
-                format!(" ({:.1}% free)", available as f64 / total as f64 * 100.0)
-            };
+            let percentage = format_free_percentage(available, total);
             facts.push((
                 "Storage".to_string(),
                 format!(
@@ -539,9 +540,11 @@ fn render_status_terminal(data: &Value) -> Option<Vec<String>> {
             .map(|(label, _)| label.chars().count())
             .max()
             .unwrap_or_default();
-        lines.extend(facts.into_iter().map(|(label, value)| {
-            format!("{label:<label_width$}  {value}", label_width = label_width)
-        }));
+        lines.extend(
+            facts
+                .into_iter()
+                .map(|(label, value)| format!("{label:<label_width$}  {value}")),
+        );
     }
 
     Some(lines)
@@ -622,8 +625,7 @@ fn push_status_component(
     }
     let status = status
         .and_then(Value::as_str)
-        .map(|status| status.to_ascii_uppercase())
-        .unwrap_or_else(|| "ERROR".to_string());
+        .map_or_else(|| "ERROR".to_string(), str::to_ascii_uppercase);
     components.push((
         name.to_string(),
         status,
@@ -645,21 +647,36 @@ fn format_timestamp(timestamp: &str) -> String {
     let Some((date, time)) = timestamp.split_once('T') else {
         return timestamp.to_string();
     };
-    let (clock, zone) = if let Some(clock) = time.strip_suffix('Z') {
-        (clock, Some("UTC"))
-    } else if let Some(index) = time.find(['+', '-']) {
-        (&time[..index], Some(&time[index..]))
-    } else {
-        (time, None)
-    };
+    let (clock, zone) = split_clock_and_zone(time);
     let clock = clock.split('.').next().unwrap_or(clock);
     let clock = clock.get(..5).unwrap_or(clock);
-    match zone {
-        Some(zone) => format!("{date} {clock} {zone}"),
-        None => format!("{date} {clock}"),
+    zone.map_or_else(
+        || format!("{date} {clock}"),
+        |zone| format!("{date} {clock} {zone}"),
+    )
+}
+
+fn split_clock_and_zone(time: &str) -> (&str, Option<&str>) {
+    if let Some(clock) = time.strip_suffix('Z') {
+        return (clock, Some("UTC"));
+    }
+    time.find(['+', '-'])
+        .and_then(|index| time.split_at_checked(index))
+        .map_or((time, None), |(clock, zone)| (clock, Some(zone)))
+}
+
+// The displayed percentage is rounded to one decimal place.
+#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+fn format_free_percentage(available: u64, total: u64) -> String {
+    if total == 0 {
+        String::new()
+    } else {
+        format!(" ({:.1}% free)", available as f64 / total as f64 * 100.0)
     }
 }
 
+// Keep the existing fractional byte display rounded to one decimal place.
+#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut value = bytes as f64;
@@ -671,7 +688,7 @@ fn format_bytes(bytes: u64) -> String {
     if unit == 0 {
         format!("{bytes} B")
     } else {
-        format!("{value:.1} {}", UNITS[unit])
+        format!("{value:.1} {}", UNITS.get(unit).copied().unwrap_or("PiB"))
     }
 }
 
@@ -683,10 +700,9 @@ fn display_name(value: &str) -> String {
         "docker" => "Docker".to_string(),
         _ => {
             let mut characters = value.chars();
-            match characters.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
-                None => String::new(),
-            }
+            characters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + characters.as_str()
+            })
         }
     }
 }
@@ -694,8 +710,7 @@ fn display_name(value: &str) -> String {
 fn display_value(value: &Value) -> String {
     value
         .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| value.to_string())
+        .map_or_else(|| value.to_string(), str::to_string)
 }
 
 fn non_null(value: &Value) -> bool {
@@ -729,7 +744,7 @@ fn render_value_as_markdown(lines: &mut Vec<String>, value: &Value, depth: usize
         Value::Null => lines.push(format!("{indent}- null")),
         Value::Bool(boolean) => lines.push(format!("{indent}- `{boolean}`")),
         Value::Number(number) => lines.push(format!("{indent}- `{number}`")),
-        Value::String(text) => lines.push(format!("{indent}- {}", text)),
+        Value::String(text) => lines.push(format!("{indent}- {text}")),
         Value::Array(items) => {
             if items.is_empty() {
                 lines.push(format!("{indent}- []"));
@@ -761,8 +776,7 @@ fn render_value_as_markdown(lines: &mut Vec<String>, value: &Value, depth: usize
                         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
                             let inline = nested
                                 .as_str()
-                                .map(str::to_string)
-                                .unwrap_or_else(|| nested.to_string());
+                                .map_or_else(|| nested.to_string(), str::to_string);
                             lines.push(format!("{indent}- **{key}**: {inline}"));
                         }
                         _ => {
@@ -786,8 +800,7 @@ fn render_value_as_markdown(lines: &mut Vec<String>, value: &Value, depth: usize
                     Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
                         let inline = nested
                             .as_str()
-                            .map(str::to_string)
-                            .unwrap_or_else(|| nested.to_string());
+                            .map_or_else(|| nested.to_string(), str::to_string);
                         lines.push(format!("{indent}- **{key}**: {inline}"));
                     }
                     _ => {
@@ -806,7 +819,7 @@ fn try_render_table(items: &[Value]) -> Option<Vec<String>> {
     let mut headers = preferred
         .iter()
         .filter(|key| first.contains_key(**key))
-        .map(|key| key.to_string())
+        .map(std::string::ToString::to_string)
         .collect::<Vec<_>>();
 
     for key in first.keys() {
@@ -869,10 +882,10 @@ trait SeverityName {
 impl SeverityName for crate::security::Severity {
     fn as_ref(&self) -> &str {
         match self {
-            crate::security::Severity::Critical => "critical",
-            crate::security::Severity::High => "high",
-            crate::security::Severity::Medium => "medium",
-            crate::security::Severity::Low => "low",
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
         }
     }
 }

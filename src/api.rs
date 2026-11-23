@@ -91,7 +91,8 @@ impl ReqwestTransport {
         Ok(Self { config, client })
     }
 
-    pub fn config(&self) -> &AppConfig {
+    #[must_use]
+    pub const fn config(&self) -> &AppConfig {
         &self.config
     }
 }
@@ -198,11 +199,11 @@ pub struct ApiClient<T: Transport> {
 }
 
 impl<T: Transport> ApiClient<T> {
-    pub fn new(transport: T) -> Self {
+    pub const fn new(transport: T) -> Self {
         Self { transport }
     }
 
-    pub fn transport(&self) -> &T {
+    pub const fn transport(&self) -> &T {
         &self.transport
     }
 
@@ -210,13 +211,13 @@ impl<T: Transport> ApiClient<T> {
         let mut request = RequestData::new(HttpMethod::Get, path);
         request.query = query;
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn get_json_absolute(&self, url: String) -> Result<Value, AppError> {
         let request = RequestData::absolute(HttpMethod::Get, url);
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn get_raw(
@@ -235,7 +236,7 @@ impl<T: Transport> ApiClient<T> {
         let mut request = RequestData::new(HttpMethod::Post, path);
         request.json_body = Some(body);
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn post_json_raw(&self, path: &str, body: Value) -> Result<ResponseData, AppError> {
@@ -256,21 +257,21 @@ impl<T: Transport> ApiClient<T> {
         request.multipart_fields = fields;
         request.multipart_file = Some(file);
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn patch_json(&self, path: &str, body: Value) -> Result<Value, AppError> {
         let mut request = RequestData::new(HttpMethod::Patch, path);
         request.json_body = Some(body);
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn put_json(&self, path: &str, body: Value) -> Result<Value, AppError> {
         let mut request = RequestData::new(HttpMethod::Put, path);
         request.json_body = Some(body);
         let response = self.transport.send(request)?;
-        self.decode_json_response(response)
+        Self::decode_json_response(&response)
     }
 
     pub fn delete(&self, path: &str) -> Result<(), AppError> {
@@ -307,7 +308,7 @@ impl<T: Transport> ApiClient<T> {
                 Endpoint::Relative(path) => RequestData::new(HttpMethod::Get, path),
                 Endpoint::Absolute(url) => RequestData::absolute(HttpMethod::Get, url),
             };
-            request.query = params.clone();
+            request.query = std::mem::take(&mut params);
 
             let response = self.transport.send(request)?;
             check_response(&response)?;
@@ -335,7 +336,6 @@ impl<T: Transport> ApiClient<T> {
                 .map(|url| validate_next_page_url(&current_url, url))
                 .transpose()?
                 .map(Endpoint::Absolute);
-            params.clear();
         }
 
         Ok(results)
@@ -367,12 +367,12 @@ impl<T: Transport> ApiClient<T> {
         }
     }
 
-    fn decode_json_response(&self, response: ResponseData) -> Result<Value, AppError> {
-        check_response(&response)?;
+    fn decode_json_response(response: &ResponseData) -> Result<Value, AppError> {
+        check_response(response)?;
         if response.body.is_empty() || response.status == 204 {
             return Ok(json!({}));
         }
-        parse_json_body(&response)
+        parse_json_body(response)
     }
 }
 
@@ -447,15 +447,15 @@ pub fn check_response(response: &ResponseData) -> Result<(), AppError> {
 }
 
 fn parse_error_message(body: &[u8]) -> String {
-    serde_json::from_slice::<Value>(body)
-        .ok()
-        .map(|json| {
+    serde_json::from_slice::<Value>(body).ok().map_or_else(
+        || String::from_utf8_lossy(body).to_string(),
+        |json| {
             if let Some(detail) = json.get("detail").and_then(Value::as_str) {
                 return detail.to_string();
             }
             json.to_string()
-        })
-        .unwrap_or_else(|| String::from_utf8_lossy(body).to_string())
+        },
+    )
 }
 
 pub fn multipart_file_from_path(path: &Path) -> Result<MultipartFile, AppError> {
