@@ -16,13 +16,15 @@ use ratatui::widgets::{
     ScrollbarState, Wrap,
 };
 use ratatui::{Frame, Terminal};
+use serde_json::Value;
 
 use crate::api::{ApiClient, Transport};
+use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::security::{SecurityFinding, Severity};
 use crate::services::{
     document_summaries_from_response, fetch_latest_task, get_document_inspector, list_documents,
-    next_page_url_from_response, DashboardSnapshot, DocumentInspector, DocumentQuery,
+    next_page_url_from_response, status, DashboardSnapshot, DocumentInspector, DocumentQuery,
     DocumentSummary, TaskSummary,
 };
 
@@ -52,10 +54,14 @@ pub struct TuiApp {
     pub inspector_viewport_height: usize,
     pub focus: PaneFocus,
     pending_inspector_id: Option<u64>,
+    connecting: bool,
+    loading_task: bool,
+    task_error: Option<String>,
 }
 
 #[derive(Debug)]
 enum TuiEvent {
+    Connected(Result<Value, AppError>),
     DocumentsPage {
         documents: Vec<DocumentSummary>,
         total: Option<usize>,
@@ -73,18 +79,7 @@ impl TuiApp {
     pub fn from_snapshot(snapshot: DashboardSnapshot) -> Self {
         let has_documents = !snapshot.documents.is_empty();
         let loaded_document_count = snapshot.documents.len();
-        let project_summary = snapshot
-            .project
-            .get("url")
-            .or_else(|| {
-                snapshot
-                    .project
-                    .get("response")
-                    .and_then(|value| value.get("version"))
-            })
-            .and_then(|value| value.as_str())
-            .map(|value| format!("connected {value}"))
-            .unwrap_or_else(|| "connected".to_string());
+        let project_summary = project_summary(&snapshot.project);
 
         Self {
             title: "paperless-cli".to_string(),
@@ -107,6 +102,9 @@ impl TuiApp {
             inspector_viewport_height: 1,
             focus: PaneFocus::Documents,
             pending_inspector_id: None,
+            connecting: false,
+            loading_task: false,
+            task_error: None,
         }
     }
 
@@ -140,7 +138,9 @@ impl TuiApp {
 
         sections.push(self.project_summary.clone());
 
-        if let Some(task) = &self.latest_task {
+        if let Some(error) = &self.task_error {
+            sections.push(format!("latest task unavailable: {error}"));
+        } else if let Some(task) = &self.latest_task {
             let detail = if task.note.is_empty() {
                 format!("latest task {}", task.status)
             } else {
@@ -200,6 +200,17 @@ impl TuiApp {
         self.loading_inspector = false;
         self.pending_inspector_id = None;
         self.project_summary = format!("error {message}");
+    }
+
+    fn on_latest_task(&mut self, result: Result<Option<TaskSummary>, String>) {
+        self.loading_task = false;
+        match result {
+            Ok(task) => {
+                self.latest_task = task;
+                self.task_error = None;
+            }
+            Err(error) => self.task_error = Some(error),
+        }
     }
 
     pub fn request_documents_reload(&mut self) {
@@ -379,24 +390,65 @@ pub fn run_tui<T: Transport + Clone + Send + 'static>(
     snapshot: DashboardSnapshot,
     security_receiver: Receiver<Vec<SecurityFinding>>,
 ) -> Result<(), AppError> {
+    run_tui_inner(
+        client,
+        TuiApp::from_snapshot(snapshot),
+        None,
+        security_receiver,
+    )
+}
+
+pub fn run_connecting_tui<T: Transport + Clone + Send + 'static>(
+    client: ApiClient<T>,
+    config: AppConfig,
+    security: Vec<SecurityFinding>,
+    security_receiver: Receiver<Vec<SecurityFinding>>,
+) -> Result<(), AppError> {
+    let mut app = TuiApp::from_snapshot(DashboardSnapshot {
+        project: Value::Null,
+        documents: Vec::new(),
+        latest_task: None,
+        security,
+    });
+    app.project_summary = format!("connecting {}", config.base_url);
+    app.connecting = true;
+    run_tui_inner(client, app, Some(config), security_receiver)
+}
+
+fn run_tui_inner<T: Transport + Clone + Send + 'static>(
+    client: ApiClient<T>,
+    mut app: TuiApp,
+    config: Option<AppConfig>,
+    security_receiver: Receiver<Vec<SecurityFinding>>,
+) -> Result<(), AppError> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let mut app = TuiApp::from_snapshot(snapshot);
     let (event_sender, event_receiver) = mpsc::channel();
 
-    spawn_documents_loader(client.clone(), event_sender.clone());
+    let result = (|| {
+        terminal.draw(|frame| draw(frame, &mut app))?;
+        if let Some(config) = config {
+            let client = client.clone();
+            let events = event_sender.clone();
+            std::thread::spawn(move || {
+                let _ = events.send(TuiEvent::Connected(status(&client, &config)));
+            });
+        } else {
+            spawn_documents_loader(client.clone(), event_sender.clone());
+        }
 
-    let result = run_event_loop(
-        &mut terminal,
-        &mut app,
-        client,
-        security_receiver,
-        event_sender,
-        event_receiver,
-    );
+        run_event_loop(
+            &mut terminal,
+            &mut app,
+            client,
+            security_receiver,
+            event_sender,
+            event_receiver,
+        )
+    })();
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -419,6 +471,13 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
 
         while let Ok(event) = event_receiver.try_recv() {
             match event {
+                TuiEvent::Connected(result) => {
+                    app.project_summary = project_summary(&result?);
+                    app.connecting = false;
+                    app.loading_task = true;
+                    spawn_documents_loader(client.clone(), event_sender.clone());
+                    spawn_latest_task_loader(client.clone(), event_sender.clone());
+                }
                 TuiEvent::DocumentsPage {
                     documents,
                     total,
@@ -436,10 +495,7 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     Ok(inspector) => app.on_inspector_loaded(document_id, inspector),
                     Err(error) => app.on_loader_error(error),
                 },
-                TuiEvent::LatestTask(result) => match result {
-                    Ok(task) => app.latest_task = task,
-                    Err(error) => app.on_loader_error(error),
-                },
+                TuiEvent::LatestTask(result) => app.on_latest_task(result),
             }
         }
 
@@ -479,10 +535,13 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                         PaneFocus::Documents => app.select_last(),
                         PaneFocus::Inspector => app.scroll_inspector_bottom(),
                     },
-                    KeyCode::Char('r') => {
+                    KeyCode::Char('r') if !app.connecting => {
                         app.request_documents_reload();
                         spawn_documents_loader(client.clone(), event_sender.clone());
-                        spawn_latest_task_loader(client.clone(), event_sender.clone());
+                        if !app.loading_task {
+                            app.loading_task = true;
+                            spawn_latest_task_loader(client.clone(), event_sender.clone());
+                        }
                         false
                     }
                     _ => false,
@@ -496,6 +555,21 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
             }
         }
     }
+}
+
+fn project_summary(project: &Value) -> String {
+    project
+        .get("url")
+        .or_else(|| {
+            project
+                .get("response")
+                .and_then(|value| value.get("version"))
+        })
+        .and_then(Value::as_str)
+        .map_or_else(
+            || "connected".to_string(),
+            |value| format!("connected {value}"),
+        )
 }
 
 fn spawn_documents_loader<T: Transport + Clone + Send + 'static>(
@@ -734,5 +808,46 @@ fn severity_label(severity: &Severity) -> &'static str {
         Severity::High => "high",
         Severity::Medium => "medium",
         Severity::Low => "low",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_task_error_leaves_document_loading_independent() {
+        let mut app = TuiApp::from_snapshot(DashboardSnapshot {
+            project: serde_json::json!({"url": "https://paperless.example.com"}),
+            documents: vec![],
+            latest_task: None,
+            security: vec![],
+        });
+        app.loading_task = true;
+
+        app.on_latest_task(Err("HTTP 403 Forbidden".to_string()));
+        assert!(app.loading_documents);
+        assert!(!app.loading_task);
+        assert!(app
+            .selected_metadata()
+            .iter()
+            .any(|line| { line == "latest task unavailable: HTTP 403 Forbidden" }));
+        assert_eq!(
+            app.on_documents_page(
+                vec![DocumentSummary {
+                    id: 42,
+                    title: "Invoice".to_string(),
+                    created: "2026-11-18".to_string(),
+                }],
+                Some(1),
+                true,
+            ),
+            Some(42)
+        );
+        assert_eq!(app.current_document_id(), Some(42));
+        assert!(!app.loading_documents);
+
+        app.on_latest_task(Ok(None));
+        assert!(app.task_error.is_none());
     }
 }

@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use paperless_cli::api::{ApiClient, Endpoint, HttpMethod, RequestData, ResponseData, Transport};
 use paperless_cli::config::{
@@ -574,6 +576,61 @@ fn tui_dashboard_uses_first_task_and_does_not_fetch_later_pages() {
             vec![("page_size".to_string(), "1".to_string())]
         );
     }
+}
+
+#[test]
+fn operational_overview_starts_all_independent_reads_before_any_response() {
+    struct GatedTransport(Sender<(String, Sender<ResponseData>)>);
+
+    impl Transport for GatedTransport {
+        fn send(&self, request: RequestData) -> Result<ResponseData, AppError> {
+            let Endpoint::Relative(path) = request.endpoint else {
+                panic!("unexpected absolute request");
+            };
+            let (respond, response) = mpsc::channel();
+            self.0.send((path, respond)).unwrap();
+            response
+                .recv_timeout(Duration::from_secs(3))
+                .map_err(|error| AppError::Message(error.to_string()))
+        }
+    }
+
+    let (requests, started) = mpsc::channel();
+    let client = ApiClient::new(GatedTransport(requests));
+    let config = AppConfig::new(
+        "https://paperless.example.com",
+        "test-token",
+        OutputMode::Json,
+    )
+    .unwrap();
+    let overview =
+        std::thread::spawn(move || services::operational_overview_parallel(&client, &config));
+
+    let mut pending = BTreeMap::new();
+    for _ in 0..3 {
+        let (path, respond) = started.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(pending.insert(path, respond).is_none());
+    }
+    for (path, body) in [
+        ("status/", json!({"version": "test"})),
+        ("statistics/", json!({"documents_total": 7})),
+        ("tasks/", json!([{"id": 12, "status": "SUCCESS"}])),
+    ] {
+        pending
+            .remove(path)
+            .unwrap()
+            .send(ResponseData {
+                status: 200,
+                url: format!("https://paperless.example.com/api/{path}"),
+                headers: BTreeMap::new(),
+                body: serde_json::to_vec(&body).unwrap(),
+            })
+            .unwrap();
+    }
+    let data = overview.join().unwrap().unwrap();
+    assert_eq!(data["status"]["response"]["version"], "test");
+    assert_eq!(data["statistics"]["documents_total"], 7);
+    assert_eq!(data["tasks"][0]["id"], 12);
 }
 
 #[test]
