@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>damacus/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge minor and patch updates for stable versions after checks pass",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^v?0(?:\\.|$)/",
+      "automerge": true,
+      "platformAutomerge": false
+    }
   ]
 }
