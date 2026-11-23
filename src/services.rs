@@ -1,12 +1,12 @@
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use crate::api::{
-    fetch_token, multipart_file_from_path, ApiClient, RequestData, ResponseData, Transport,
-};
+use crate::api::{fetch_token, ApiClient, RequestData, ResponseData, Transport};
 use crate::config::{
     load_config, load_session, normalize_url, save_config, save_session, AppConfig, AppPaths,
     OutputMode, SessionState,
@@ -298,8 +298,7 @@ pub fn upload_document<T: Transport>(
         fields.push(("tags".to_string(), tag_id.to_string()));
     }
 
-    let file = multipart_file_from_path(&request.path)?;
-    client.post_multipart("documents/post_document/", fields, file)
+    client.post_multipart_path("documents/post_document/", fields, &request.path)
 }
 
 pub fn update_document<T: Transport>(
@@ -608,7 +607,7 @@ pub fn bulk_download_zip<T: Transport>(
     output_path: &Path,
     content: &str,
 ) -> Result<PathBuf, AppError> {
-    let response = client.post_json_raw(
+    let mut response = client.post_download(
         "documents/bulk_download/",
         json!({
             "documents": document_ids,
@@ -616,10 +615,7 @@ pub fn bulk_download_zip<T: Transport>(
         }),
     )?;
 
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(output_path, &response.body)?;
+    write_download(output_path, response.body.as_mut())?;
     Ok(output_path.to_path_buf())
 }
 
@@ -902,8 +898,7 @@ fn download_asset<T: Transport>(
     output_dir: &Path,
     params: Vec<(String, String)>,
 ) -> Result<PathBuf, AppError> {
-    let response = client.get_raw(&format!("documents/{document_id}/{asset}/"), params)?;
-    std::fs::create_dir_all(output_dir)?;
+    let mut response = client.get_download(&format!("documents/{document_id}/{asset}/"), params)?;
 
     let filename = response
         .headers
@@ -914,8 +909,88 @@ fn download_asset<T: Transport>(
             |value| sanitize_filename(&value),
         );
     let output_path = output_dir.join(filename);
-    std::fs::write(&output_path, response.body)?;
+    write_download(&output_path, response.body.as_mut())?;
     Ok(output_path)
+}
+
+fn write_download(destination: &Path, body: &mut dyn Read) -> Result<(), AppError> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new(""));
+    fs::create_dir_all(parent)?;
+
+    let previous = match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.is_file() => {
+            // Preserve the write permission check that preceded atomic replacement.
+            drop(OpenOptions::new().write(true).open(destination)?);
+            Some(metadata)
+        }
+        Ok(_) => None,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let (mut temporary, mut file) = TemporaryDownload::create(parent)?;
+    let mut reader = BufReader::with_capacity(128 * 1024, body);
+    io::copy(&mut reader, &mut file)?;
+    file.flush()?;
+    if let Some(metadata) = previous {
+        let permissions = metadata.permissions();
+        // A read-only temporary file may not be removable on Windows.
+        if cfg!(unix) || !permissions.readonly() {
+            file.set_permissions(permissions)?;
+        }
+    }
+    drop(file);
+
+    fs::rename(&temporary.path, destination)?;
+    temporary.committed = true;
+    Ok(())
+}
+
+struct TemporaryDownload {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl TemporaryDownload {
+    fn create(parent: &Path) -> io::Result<(Self, File)> {
+        static NEXT_DOWNLOAD: AtomicU64 = AtomicU64::new(0);
+        let process = std::process::id();
+        for _ in 0..32 {
+            let id = NEXT_DOWNLOAD.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!(".paperless-{process}-{id}.part"));
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(&path) {
+                Ok(file) => {
+                    return Ok((
+                        Self {
+                            path,
+                            committed: false,
+                        },
+                        file,
+                    ));
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not create a temporary download",
+        ))
+    }
+}
+
+impl Drop for TemporaryDownload {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn extract_download_filename(content_disposition: &str) -> Option<String> {
