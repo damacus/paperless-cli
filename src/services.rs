@@ -348,14 +348,23 @@ pub fn edit_document<T: Transport>(
         .map(|tags| tags.iter().filter_map(Value::as_u64).collect::<Vec<_>>())
         .unwrap_or_default();
 
+    let catalogue = if add_tags
+        .iter()
+        .chain(remove_tags)
+        .any(|reference| reference.parse::<u64>().is_err())
+    {
+        client.paginate("tags/", Vec::new())?
+    } else {
+        Vec::new()
+    };
     let mut resolved_tags = existing_tags;
-    for tag_id in resolve_tag_inputs(client, add_tags)? {
+    for tag_id in resolve_tag_inputs(&catalogue, add_tags)? {
         if !resolved_tags.contains(&tag_id) {
             resolved_tags.push(tag_id);
         }
     }
 
-    let removed = resolve_tag_inputs(client, remove_tags)?;
+    let removed = resolve_tag_inputs(&catalogue, remove_tags)?;
     resolved_tags.retain(|tag_id| !removed.contains(tag_id));
 
     let mut merged = request.clone();
@@ -629,7 +638,7 @@ pub fn dashboard<T: Transport>(
 ) -> Result<DashboardSnapshot, AppError> {
     let project = status(client, config)?;
     let documents = Vec::new();
-    let latest_task = latest_task_summary(&list_tasks(client)?);
+    let latest_task = fetch_latest_task(client)?;
 
     Ok(DashboardSnapshot {
         project,
@@ -736,39 +745,43 @@ pub fn document_text_representation(document: &Value) -> String {
     }
 }
 
+pub(crate) fn fetch_latest_task<T: Transport>(
+    client: &ApiClient<T>,
+) -> Result<Option<TaskSummary>, AppError> {
+    let tasks = client.paginate_up_to(
+        "tasks/",
+        vec![("page_size".to_string(), "1".to_string())],
+        1,
+    )?;
+    Ok(tasks.first().map(summarize_task))
+}
+
 pub fn latest_task_summary(tasks: &Value) -> Option<TaskSummary> {
     tasks
         .as_array()
         .and_then(|items| items.first())
-        .map(|task| TaskSummary {
-            id: task.get("id").and_then(Value::as_u64),
-            status: task
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            note: task
-                .get("task_file_name")
-                .or_else(|| task.get("type"))
-                .or_else(|| task.get("result"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-        })
+        .map(summarize_task)
 }
 
-fn resolve_tag_inputs<T: Transport>(
-    client: &ApiClient<T>,
-    references: &[String],
-) -> Result<Vec<u64>, AppError> {
-    if references.is_empty() {
-        return Ok(Vec::new());
+fn summarize_task(task: &Value) -> TaskSummary {
+    TaskSummary {
+        id: task.get("id").and_then(Value::as_u64),
+        status: task
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        note: task
+            .get("task_file_name")
+            .or_else(|| task.get("type"))
+            .or_else(|| task.get("result"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
     }
+}
 
-    let tags = list_tags(client)?;
-    let tag_array = tags
-        .as_array()
-        .ok_or_else(|| AppError::Message("Expected tag list to be an array".to_string()))?;
+fn resolve_tag_inputs(catalogue: &[Value], references: &[String]) -> Result<Vec<u64>, AppError> {
     let mut resolved = Vec::new();
 
     for reference in references {
@@ -777,7 +790,7 @@ fn resolve_tag_inputs<T: Transport>(
             continue;
         }
 
-        let maybe_id = tag_array.iter().find_map(|tag| {
+        let maybe_id = catalogue.iter().find_map(|tag| {
             let name = tag.get("name").and_then(Value::as_str)?;
             if name == reference {
                 tag.get("id").and_then(Value::as_u64)

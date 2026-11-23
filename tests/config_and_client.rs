@@ -426,20 +426,15 @@ fn document_edit_resolves_exact_tag_names_and_merges_tags() {
     transport.push_json(
         200,
         "https://paperless.example.com/api/tags/",
-        json!([
-            {"id": 1, "name": "existing"},
-            {"id": 2, "name": "important"},
-            {"id": 3, "name": "todo"}
-        ]),
+        json!({
+            "results": [{"id": 2, "name": "important"}],
+            "next": "https://paperless.example.com/api/tags/?page=2",
+        }),
     );
     transport.push_json(
         200,
-        "https://paperless.example.com/api/tags/",
-        json!([
-            {"id": 1, "name": "existing"},
-            {"id": 2, "name": "important"},
-            {"id": 3, "name": "todo"}
-        ]),
+        "https://paperless.example.com/api/tags/?page=2",
+        json!({"results": [{"id": 3, "name": "todo"}], "next": null}),
     );
     transport.push_json(
         200,
@@ -459,7 +454,7 @@ fn document_edit_resolves_exact_tag_names_and_merges_tags() {
             created: None,
             custom_fields: None,
         },
-        &["important".to_string()],
+        &["important".to_string(), "2".to_string(), "3".to_string()],
         &["todo".to_string()],
     )
     .unwrap();
@@ -467,6 +462,14 @@ fn document_edit_resolves_exact_tag_names_and_merges_tags() {
     assert_eq!(response["tags"], json!([1, 2]));
     let requests = transport.requests();
     assert_eq!(requests.len(), 4);
+    assert_eq!(
+        requests[1].endpoint,
+        Endpoint::Relative("tags/".to_string())
+    );
+    assert_eq!(
+        requests[2].endpoint,
+        Endpoint::Absolute("https://paperless.example.com/api/tags/?page=2".to_string())
+    );
     assert_eq!(requests[3].method, HttpMethod::Patch);
     assert_eq!(
         requests[3].json_body.as_ref().unwrap()["tags"],
@@ -476,6 +479,101 @@ fn document_edit_resolves_exact_tag_names_and_merges_tags() {
         requests[3].json_body.as_ref().unwrap()["title"],
         json!("Updated title")
     );
+}
+
+#[test]
+fn document_edit_with_numeric_tags_only_needs_document_permissions() {
+    let transport = MockTransport::default();
+    let document_url = "https://paperless.example.com/api/documents/42/";
+    transport.push_json(200, document_url, json!({"id": 42, "tags": [1, 3]}));
+    transport.push_json(200, document_url, json!({"id": 42, "tags": [1, 2]}));
+
+    services::edit_document(
+        &ApiClient::new(transport.clone()),
+        42,
+        &UpdateRequest::default(),
+        &["2".to_string(), "2".to_string()],
+        &["3".to_string()],
+    )
+    .unwrap();
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].method, HttpMethod::Patch);
+    assert_eq!(requests[1].json_body, Some(json!({"tags": [1, 2]})));
+}
+
+#[test]
+fn document_edit_keeps_named_lookup_errors_and_never_patches_on_failure() {
+    let tags_url = "https://paperless.example.com/api/tags/";
+    for (status, payload) in [
+        (200, json!([{"id": 3, "name": "TODO"}])),
+        (403, json!({"detail": "Forbidden"})),
+    ] {
+        let transport = MockTransport::default();
+        transport.push_json(
+            200,
+            "https://paperless.example.com/api/documents/42/",
+            json!({"id": 42, "tags": [1, 3]}),
+        );
+        transport.push_json(status, tags_url, payload);
+
+        let error = services::edit_document(
+            &ApiClient::new(transport.clone()),
+            42,
+            &UpdateRequest::default(),
+            &["2".to_string()],
+            &["todo".to_string()],
+        )
+        .unwrap_err();
+
+        if status == 403 {
+            assert!(matches!(error, AppError::Http { status: 403, .. }));
+        } else {
+            assert!(error.to_string().contains("Unknown tag reference `todo`"));
+        }
+        let requests = transport.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request.method == HttpMethod::Get));
+    }
+}
+
+#[test]
+fn tui_dashboard_uses_first_task_and_does_not_fetch_later_pages() {
+    // API v9 and older servers can return a list. API v10 supports page_size.
+    // The TasksViewSet orders both response formats newest first.
+    let first = json!({"id": 12, "status": "PENDING"});
+    for tasks in [
+        json!([first, {"id": 10, "status": "SUCCESS"}]),
+        json!({
+            "results": [first],
+            "next": "https://paperless.example.com/api/tasks/?page=2&page_size=1"
+        }),
+    ] {
+        let transport = MockTransport::default();
+        let config = AppConfig {
+            base_url: "https://paperless.example.com".to_string(),
+            token: "test-token".to_string(),
+            preferred_output: OutputMode::Markdown,
+        };
+        transport.push_json(200, "https://paperless.example.com/api/status/", json!({}));
+        transport.push_json(200, "https://paperless.example.com/api/tasks/", tasks);
+
+        let dashboard =
+            services::dashboard(&ApiClient::new(transport.clone()), &config, vec![]).unwrap();
+
+        let latest_task = dashboard.latest_task.unwrap();
+        assert_eq!(latest_task.id, Some(12));
+        assert_eq!(latest_task.status, "PENDING");
+        let requests = transport.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].query,
+            vec![("page_size".to_string(), "1".to_string())]
+        );
+    }
 }
 
 #[test]
