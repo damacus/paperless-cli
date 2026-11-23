@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::fs::{self, File};
+use std::io::{BufReader, Cursor, Read};
 use std::path::Path;
 
 use reqwest::blocking::multipart::{Form, Part};
@@ -72,8 +74,33 @@ pub struct ResponseData {
     pub body: Vec<u8>,
 }
 
+/// Headers and readable body for a successful binary response.
+pub struct DownloadResponse {
+    pub headers: BTreeMap<String, String>,
+    pub body: Box<dyn Read>,
+}
+
+impl DownloadResponse {
+    fn from_buffered(response: ResponseData) -> Result<Self, AppError> {
+        check_response(&response)?;
+        Ok(Self {
+            headers: response.headers,
+            body: Box::new(Cursor::new(response.body)),
+        })
+    }
+}
+
 pub trait Transport {
     fn send(&self, request: RequestData) -> Result<ResponseData, AppError>;
+
+    fn download(&self, request: RequestData) -> Result<DownloadResponse, AppError> {
+        DownloadResponse::from_buffered(self.send(request)?)
+    }
+
+    fn upload_file(&self, mut request: RequestData, path: &Path) -> Result<ResponseData, AppError> {
+        request.multipart_file = Some(multipart_file_from_path(path)?);
+        self.send(request)
+    }
 }
 
 #[derive(Clone)]
@@ -95,10 +122,11 @@ impl ReqwestTransport {
     pub const fn config(&self) -> &AppConfig {
         &self.config
     }
-}
-
-impl Transport for ReqwestTransport {
-    fn send(&self, request: RequestData) -> Result<ResponseData, AppError> {
+    fn send_http(
+        &self,
+        request: RequestData,
+        streamed_file: Option<Part>,
+    ) -> Result<reqwest::blocking::Response, AppError> {
         let url = match request.endpoint {
             Endpoint::Relative(path) => self.config.api_url(&path),
             Endpoint::Absolute(url) => url,
@@ -120,33 +148,31 @@ impl Transport for ReqwestTransport {
 
         if let Some(json_body) = request.json_body {
             builder = builder.json(&json_body);
-        } else if let Some(file) = request.multipart_file {
+        } else if streamed_file.is_some() || request.multipart_file.is_some() {
             let mut form = Form::new();
             for (key, value) in request.multipart_fields {
                 form = form.text(key, value);
             }
 
-            let part = Part::bytes(file.bytes)
-                .file_name(file.file_name)
-                .mime_str(&file.mime)
-                .map_err(|error| AppError::Message(error.to_string()))?;
-            form = form.part(file.field_name, part);
+            if let Some(part) = streamed_file {
+                form = form.part("document", part);
+            } else if let Some(file) = request.multipart_file {
+                let part = Part::bytes(file.bytes)
+                    .file_name(file.file_name)
+                    .mime_str(&file.mime)
+                    .map_err(|error| AppError::Message(error.to_string()))?;
+                form = form.part(file.field_name, part);
+            }
             builder = builder.multipart(form);
         }
 
-        let response = builder.send()?;
+        Ok(builder.send()?)
+    }
+
+    fn buffer_response(response: reqwest::blocking::Response) -> Result<ResponseData, AppError> {
         let status = response.status().as_u16();
         let url = response.url().to_string();
-        let headers = response
-            .headers()
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.to_string().to_lowercase(),
-                    value.to_str().unwrap_or_default().to_string(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let headers = response_headers(&response);
         let body = response.bytes()?.to_vec();
 
         Ok(ResponseData {
@@ -156,6 +182,60 @@ impl Transport for ReqwestTransport {
             body,
         })
     }
+}
+
+impl Transport for ReqwestTransport {
+    fn send(&self, request: RequestData) -> Result<ResponseData, AppError> {
+        Self::buffer_response(self.send_http(request, None)?)
+    }
+
+    fn download(&self, request: RequestData) -> Result<DownloadResponse, AppError> {
+        let response = self.send_http(request, None)?;
+        if !response.status().is_success() {
+            return DownloadResponse::from_buffered(Self::buffer_response(response)?);
+        }
+        Ok(DownloadResponse {
+            headers: response_headers(&response),
+            body: Box::new(response),
+        })
+    }
+
+    fn upload_file(&self, mut request: RequestData, path: &Path) -> Result<ResponseData, AppError> {
+        if !path.exists() {
+            return Err(AppError::FileMissing(path.to_path_buf()));
+        }
+        if !fs::metadata(path)?.is_file() {
+            request.multipart_file = Some(multipart_file_from_path(path)?);
+            return self.send(request);
+        }
+
+        let file = File::open(path)?;
+        let size = file.metadata()?.len();
+        // Some readable pseudo-files report zero length even when they contain data.
+        if size == 0 {
+            request.multipart_file = Some(multipart_file_from_path(path)?);
+            return self.send(request);
+        }
+        let reader = BufReader::with_capacity(128 * 1024, file.take(size));
+        let part = Part::reader_with_length(reader, size)
+            .file_name(multipart_filename(path).to_string())
+            .mime_str(&multipart_mime(path))
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        Self::buffer_response(self.send_http(request, Some(part))?)
+    }
+}
+
+fn response_headers(response: &reqwest::blocking::Response) -> BTreeMap<String, String> {
+    response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.to_string().to_lowercase(),
+                value.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
 }
 
 pub fn fetch_token(base_url: &str, username: &str, password: &str) -> Result<String, AppError> {
@@ -258,6 +338,38 @@ impl<T: Transport> ApiClient<T> {
         request.multipart_file = Some(file);
         let response = self.transport.send(request)?;
         Self::decode_json_response(&response)
+    }
+
+    pub(crate) fn post_multipart_path(
+        &self,
+        path: &str,
+        fields: Vec<(String, String)>,
+        upload: &Path,
+    ) -> Result<Value, AppError> {
+        let mut request = RequestData::new(HttpMethod::Post, path);
+        request.multipart_fields = fields;
+        let response = self.transport.upload_file(request, upload)?;
+        Self::decode_json_response(&response)
+    }
+
+    pub(crate) fn get_download(
+        &self,
+        path: &str,
+        query: Vec<(String, String)>,
+    ) -> Result<DownloadResponse, AppError> {
+        let mut request = RequestData::new(HttpMethod::Get, path);
+        request.query = query;
+        self.transport.download(request)
+    }
+
+    pub(crate) fn post_download(
+        &self,
+        path: &str,
+        body: Value,
+    ) -> Result<DownloadResponse, AppError> {
+        let mut request = RequestData::new(HttpMethod::Post, path);
+        request.json_body = Some(body);
+        self.transport.download(request)
     }
 
     pub fn patch_json(&self, path: &str, body: Value) -> Result<Value, AppError> {
@@ -463,19 +575,22 @@ pub fn multipart_file_from_path(path: &Path) -> Result<MultipartFile, AppError> 
         return Err(AppError::FileMissing(path.to_path_buf()));
     }
 
-    let bytes = std::fs::read(path)?;
-    let mime = mime_guess::from_path(path)
-        .first_or_octet_stream()
-        .to_string();
-
     Ok(MultipartFile {
         field_name: "document".to_string(),
-        file_name: path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("document.bin")
-            .to_string(),
-        mime,
-        bytes,
+        file_name: multipart_filename(path).to_string(),
+        mime: multipart_mime(path),
+        bytes: fs::read(path)?,
     })
+}
+
+fn multipart_filename(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("document.bin")
+}
+
+fn multipart_mime(path: &Path) -> String {
+    mime_guess::from_path(path)
+        .first_or_octet_stream()
+        .to_string()
 }

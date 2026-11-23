@@ -41,7 +41,10 @@
 )]
 
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
@@ -52,6 +55,100 @@ fn base_env() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let config = dir.path().join("config.toml");
     let session = dir.path().join("session.toml");
     (dir, config, session)
+}
+
+#[test]
+fn streaming_upload_sends_the_pdf_and_multipart_metadata() {
+    let server = MockServer::start();
+    let upload = server.mock(|when, then| {
+        when.method(POST)
+            .path("/api/documents/post_document/")
+            .header("authorization", "Token env-token")
+            .header_exists("content-length")
+            .header_includes("content-type", "multipart/form-data; boundary=")
+            .body_includes("name=\"title\"")
+            .body_includes("Quarterly report")
+            .body_includes("name=\"document\"; filename=\"report.pdf\"")
+            .body_includes("application/pdf")
+            .body_includes("%PDF-fixture-content");
+        then.status(200)
+            .json_body(serde_json::json!({"task_id": "local-upload"}));
+    });
+    let (directory, config, session) = base_env();
+    let pdf = directory.path().join("report.pdf");
+    fs::write(&pdf, b"%PDF-fixture-content").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", config)
+        .env("PAPERLESS_SESSION_PATH", session)
+        .env("PAPERLESS_URL", server.base_url())
+        .env("PAPERLESS_TOKEN", "env-token")
+        .args(["--json", "document", "upload"])
+        .arg(pdf)
+        .args(["--title", "Quarterly report"])
+        .output()
+        .unwrap();
+    upload.assert_calls(1);
+    assert!(output.status.success(), "{output:?}");
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["data"]["task_id"], "local-upload");
+}
+
+#[test]
+fn interrupted_download_keeps_existing_file_and_removes_partial_data() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "client did not connect");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("fixture listener failed: {error}"),
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut headers = BufReader::new(&mut stream);
+        let mut line = String::new();
+        headers.read_line(&mut line).unwrap();
+        assert!(line.starts_with("GET /api/documents/42/download/ "));
+        loop {
+            line.clear();
+            assert_ne!(headers.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        stream.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\nContent-Length: 100\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nConnection: close\r\n\r\npartial",
+        ).unwrap();
+    });
+    let (directory, config, session) = base_env();
+    let report = directory.path().join("report.pdf");
+    fs::write(&report, b"existing download").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", config)
+        .env("PAPERLESS_SESSION_PATH", session)
+        .env("PAPERLESS_URL", url)
+        .env("PAPERLESS_TOKEN", "env-token")
+        .args(["--json", "document", "download", "42", "--output-dir"])
+        .arg(directory.path())
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read(&report).unwrap(), b"existing download");
+    let entries: Vec<_> = fs::read_dir(directory.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(entries, [report]);
 }
 
 #[test]
