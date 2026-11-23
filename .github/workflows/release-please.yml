@@ -46,7 +46,9 @@ jobs:
         run: |
           mkdir -p artifacts
           cp target/release/paperless artifacts/paperless-linux-amd64
+          strip --strip-all artifacts/paperless-linux-amd64
           chmod +x artifacts/paperless-linux-amd64
+          artifacts/paperless-linux-amd64 --version
           tar czf artifacts/paperless-linux-amd64.tar.gz -C artifacts paperless-linux-amd64
 
       - name: Upload artifact

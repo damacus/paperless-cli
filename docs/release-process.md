@@ -13,10 +13,14 @@ When changes land on `main`, the release workflow does the following:
 2. Creates or updates the release PR and changelog
 3. After a release is created, checks out the tagged revision
 4. Builds the Linux release binary
-5. Packages the binary as `paperless-linux-amd64.tar.gz`
+5. Strips symbols from the Linux binary copy, checks that it starts, and
+   packages it as `paperless-linux-amd64.tar.gz`
 6. Generates `checksums-sha256.txt`
 7. Uploads the archive and checksum file to the GitHub release
 8. Publishes the crate to crates.io using `cargo publish`
+
+Symbol stripping happens before archiving and generating the published checksum.
+The release workflow builds the crate separately for crates.io.
 
 ## Required secrets
 
