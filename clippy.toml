@@ -10,6 +10,7 @@ cognitive-complexity-threshold = 30
 disallowed-methods = [
     # Confine environment reads to the designated config loader(s).
     { path = "std::env::var", reason = "read configuration via the designated config loader" },
+    { path = "std::env::var_os", reason = "read native configuration paths via the config loader" },
     # Confine process termination to the deliberate lifecycle point(s).
     { path = "std::process::exit", reason = "report command failure at the CLI entry point" },
 ]

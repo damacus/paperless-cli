@@ -101,6 +101,8 @@ pub struct AppPaths {
 }
 
 impl Default for AppPaths {
+    // Resolve configured paths here so non-Unicode OS paths stay usable.
+    #[allow(clippy::disallowed_methods)]
     fn default() -> Self {
         let config_root = std::env::var_os("PAPERLESS_CONFIG_PATH")
             .or_else(|| std::env::var_os("PAPERLESS_CLI_CONFIG_PATH"))
