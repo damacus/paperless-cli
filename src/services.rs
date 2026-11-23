@@ -628,9 +628,9 @@ pub fn operational_overview<T: Transport>(
     config: &AppConfig,
 ) -> Result<Value, AppError> {
     Ok(overview_payload(
-        &status(client, config)?,
-        &client.get_json("statistics/", Vec::new())?,
-        &list_tasks(client)?,
+        status(client, config)?,
+        client.get_json("statistics/", Vec::new())?,
+        list_tasks(client)?,
     ))
 }
 
@@ -672,15 +672,15 @@ pub fn operational_overview_parallel<T: Transport + Sync>(
             }),
         )
     });
-    Ok(overview_payload(&status?, &statistics?, &tasks?))
+    Ok(overview_payload(status?, statistics?, tasks?))
 }
 
-fn overview_payload(status: &Value, statistics: &Value, tasks: &Value) -> Value {
-    json!({
-        "status": status,
-        "statistics": statistics,
-        "tasks": tasks,
-    })
+fn overview_payload(status: Value, statistics: Value, tasks: Value) -> Value {
+    Value::Object(Map::from_iter([
+        ("status".to_string(), status),
+        ("statistics".to_string(), statistics),
+        ("tasks".to_string(), tasks),
+    ]))
 }
 
 struct OverviewTasks<'a, T> {
