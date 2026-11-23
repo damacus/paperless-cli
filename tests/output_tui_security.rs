@@ -492,7 +492,10 @@ fn security_reviewer_uses_gpt_54_and_polls_findings() {
     state.lock().unwrap().base_url = Some("https://paperless.example.com".to_string());
     state.lock().unwrap().config_permissions_restricted = true;
     let cleaned = receiver.recv_timeout(Duration::from_millis(50)).unwrap();
-    assert!(cleaned.is_empty());
+    assert_eq!(
+        cleaned,
+        Vec::<paperless_cli::security::SecurityFinding>::new()
+    );
 }
 
 #[test]
