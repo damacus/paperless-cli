@@ -31,6 +31,7 @@ pub struct DocumentQuery {
 }
 
 impl DocumentQuery {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             order_by: "-created".to_string(),
@@ -40,6 +41,7 @@ impl DocumentQuery {
         }
     }
 
+    #[must_use]
     pub fn to_query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(query) = &self.query {
@@ -162,13 +164,12 @@ pub fn init_connection<T: Transport>(
     preferred_output: OutputMode,
 ) -> Result<AppConfig, AppError> {
     let normalized = normalize_url(base_url)?;
-    let token = match token {
-        Some(token) => token,
-        None => {
-            let username = username.ok_or(AppError::MissingCredentials)?;
-            let password = password.ok_or(AppError::MissingCredentials)?;
-            fetch_token(&normalized, &username, &password)?
-        }
+    let token = if let Some(token) = token {
+        token
+    } else {
+        let username = username.ok_or(AppError::MissingCredentials)?;
+        let password = password.ok_or(AppError::MissingCredentials)?;
+        fetch_token(&normalized, &username, &password)?
     };
 
     let config = AppConfig::new(normalized, token, preferred_output)?;
@@ -420,6 +421,8 @@ pub fn get_tag<T: Transport>(client: &ApiClient<T>, tag_id: u64) -> Result<Value
     client.get_json(&format!("tags/{tag_id}/"), Vec::new())
 }
 
+// Preserve the value-taking API for callers constructing tag requests.
+#[allow(clippy::needless_pass_by_value)]
 pub fn create_tag<T: Transport>(
     client: &ApiClient<T>,
     name: String,
@@ -476,6 +479,8 @@ pub fn get_correspondent<T: Transport>(
     client.get_json(&format!("correspondents/{correspondent_id}/"), Vec::new())
 }
 
+// Preserve the value-taking API for callers constructing correspondent requests.
+#[allow(clippy::needless_pass_by_value)]
 pub fn create_correspondent<T: Transport>(
     client: &ApiClient<T>,
     name: String,
@@ -511,6 +516,8 @@ pub fn get_document_type<T: Transport>(
     client.get_json(&format!("document_types/{document_type_id}/"), Vec::new())
 }
 
+// Preserve the value-taking API for callers constructing document type requests.
+#[allow(clippy::needless_pass_by_value)]
 pub fn create_document_type<T: Transport>(
     client: &ApiClient<T>,
     name: String,
@@ -625,9 +632,9 @@ pub fn operational_overview<T: Transport>(
     config: &AppConfig,
 ) -> Result<Value, AppError> {
     Ok(overview_payload(
-        status(client, config)?,
-        client.get_json("statistics/", Vec::new())?,
-        list_tasks(client)?,
+        &status(client, config)?,
+        &client.get_json("statistics/", Vec::new())?,
+        &list_tasks(client)?,
     ))
 }
 
@@ -669,10 +676,10 @@ pub fn operational_overview_parallel<T: Transport + Sync>(
             }),
         )
     });
-    Ok(overview_payload(status?, statistics?, tasks?))
+    Ok(overview_payload(&status?, &statistics?, &tasks?))
 }
 
-fn overview_payload(status: Value, statistics: Value, tasks: Value) -> Value {
+fn overview_payload(status: &Value, statistics: &Value, tasks: &Value) -> Value {
     json!({
         "status": status,
         "statistics": statistics,
@@ -875,6 +882,7 @@ fn resolve_tag_inputs(catalogue: &[Value], references: &[String]) -> Result<Vec<
     Ok(resolved)
 }
 
+#[must_use]
 pub fn audit_state(
     paths: &AppPaths,
     config: Option<&AppConfig>,
@@ -901,8 +909,10 @@ fn download_asset<T: Transport>(
         .headers
         .get("content-disposition")
         .and_then(|header| extract_download_filename(header))
-        .map(|value| sanitize_filename(&value))
-        .unwrap_or_else(|| format!("document_{document_id}_{asset}.bin"));
+        .map_or_else(
+            || format!("document_{document_id}_{asset}.bin"),
+            |value| sanitize_filename(&value),
+        );
     let output_path = output_dir.join(filename);
     std::fs::write(&output_path, response.body)?;
     Ok(output_path)
@@ -933,8 +943,7 @@ fn decode_rfc5987_filename(value: &str) -> Option<String> {
     let trimmed = value.trim_matches('"');
     let encoded = trimmed
         .split_once("''")
-        .map(|(_, encoded)| encoded)
-        .unwrap_or(trimmed);
+        .map_or(trimmed, |(_, encoded)| encoded);
     percent_decode(encoded)
 }
 
@@ -957,6 +966,7 @@ fn percent_decode(value: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
+#[must_use]
 pub fn sanitize_filename(name: &str) -> String {
     let leaf = Path::new(name)
         .file_name()

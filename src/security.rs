@@ -31,6 +31,7 @@ pub struct SecurityAgentProfile {
 }
 
 impl SecurityAgentProfile {
+    #[must_use]
     pub fn security_reviewer() -> Self {
         Self {
             name: "security-reviewer".to_string(),
@@ -50,7 +51,8 @@ pub struct AuditState {
 }
 
 impl AuditState {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         base_url: Option<String>,
         config_permissions_restricted: bool,
         last_download_path: Option<String>,
@@ -81,11 +83,13 @@ impl fmt::Debug for SecurityAuditor {
 }
 
 impl SecurityAuditor {
-    pub fn new(profile: SecurityAgentProfile, interval: Duration) -> Self {
+    #[must_use]
+    pub const fn new(profile: SecurityAgentProfile, interval: Duration) -> Self {
         Self { profile, interval }
     }
 
-    pub fn profile(&self) -> &SecurityAgentProfile {
+    #[must_use]
+    pub const fn profile(&self) -> &SecurityAgentProfile {
         &self.profile
     }
 
@@ -95,16 +99,19 @@ impl SecurityAuditor {
         let interval = self.interval;
 
         thread::spawn(move || loop {
-            let state = shared_state.lock().map(|guard| guard.clone());
-            let findings = match state {
-                Ok(state) => review_state(&profile, &state),
-                Err(_) => vec![SecurityFinding {
-                    severity: Severity::High,
-                    title: "Security monitor failed".to_string(),
-                    detail: "The security reviewer lost access to shared state.".to_string(),
-                    remediation: "Recreate the shared audit state and restart the TUI.".to_string(),
-                }],
-            };
+            let state = shared_state.lock().ok().map(|guard| guard.clone());
+            let findings = state.map_or_else(
+                || {
+                    vec![SecurityFinding {
+                        severity: Severity::High,
+                        title: "Security monitor failed".to_string(),
+                        detail: "The security reviewer lost access to shared state.".to_string(),
+                        remediation: "Recreate the shared audit state and restart the TUI."
+                            .to_string(),
+                    }]
+                },
+                |state| review_state(&profile, &state),
+            );
 
             if sender.send(findings).is_err() {
                 break;
@@ -116,6 +123,7 @@ impl SecurityAuditor {
         receiver
     }
 
+    #[must_use]
     pub fn review_once(&self, state: &AuditState) -> Vec<SecurityFinding> {
         review_state(&self.profile, state)
     }

@@ -9,7 +9,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::Backend;
-use ratatui::layout::{Constraint, Direction, Layout, Margin};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -39,6 +39,8 @@ pub enum PaneFocus {
 }
 
 #[derive(Clone, Debug)]
+// The document, inspector, connection and task indicators are independent.
+#[allow(clippy::struct_excessive_bools)]
 pub struct TuiApp {
     pub title: String,
     pub project_summary: String,
@@ -92,6 +94,7 @@ enum TuiEvent {
 }
 
 impl TuiApp {
+    #[must_use]
     pub fn from_snapshot(snapshot: DashboardSnapshot) -> Self {
         let has_documents = !snapshot.documents.is_empty();
         let loaded_document_count = snapshot.documents.len();
@@ -132,12 +135,14 @@ impl TuiApp {
         self.security = findings;
     }
 
+    #[must_use]
     pub fn current_document_id(&self) -> Option<u64> {
         self.documents
             .get(self.selected_document)
             .map(|document| document.id)
     }
 
+    #[must_use]
     pub fn current_inspector(&self) -> Option<&DocumentInspector> {
         let document_id = self.current_document_id()?;
         self.inspector_cache.get(&document_id).or_else(|| {
@@ -148,6 +153,7 @@ impl TuiApp {
         })
     }
 
+    #[must_use]
     pub fn selected_metadata(&self) -> Vec<String> {
         let mut sections = Vec::new();
 
@@ -269,6 +275,8 @@ impl TuiApp {
         }
     }
 
+    // Preserve the owned argument accepted by existing library callers.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn on_loader_error(&mut self, message: String) {
         self.loading_documents = false;
         self.loading_inspector = false;
@@ -287,7 +295,7 @@ impl TuiApp {
         }
     }
 
-    fn on_inspector_error(&mut self, document_id: u64, error: String) {
+    fn on_inspector_error(&mut self, document_id: u64, error: &str) {
         if self.current_document_id() == Some(document_id) {
             self.loading_inspector = false;
             self.pending_inspector_id = None;
@@ -413,7 +421,7 @@ impl TuiApp {
         self.documents_state.select(selected);
     }
 
-    pub fn toggle_focus(&mut self) {
+    pub const fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             PaneFocus::Documents => PaneFocus::Inspector,
             PaneFocus::Inspector => PaneFocus::Documents,
@@ -429,7 +437,7 @@ impl TuiApp {
         true
     }
 
-    pub fn scroll_inspector_up(&mut self) -> bool {
+    pub const fn scroll_inspector_up(&mut self) -> bool {
         if self.inspector_scroll == 0 {
             return false;
         }
@@ -456,7 +464,7 @@ impl TuiApp {
         true
     }
 
-    pub fn scroll_inspector_top(&mut self) -> bool {
+    pub const fn scroll_inspector_top(&mut self) -> bool {
         if self.inspector_scroll == 0 {
             return false;
         }
@@ -476,8 +484,7 @@ impl TuiApp {
     fn max_inspector_scroll(&self) -> usize {
         let line_count = self
             .current_inspector()
-            .map(|inspector| inspector.text.lines().count())
-            .unwrap_or(1);
+            .map_or(1, |inspector| inspector.text.lines().count());
         line_count.saturating_sub(self.inspector_viewport_height.max(1))
     }
 }
@@ -512,6 +519,8 @@ pub fn run_connecting_tui<T: Transport + Clone + Send + 'static>(
     run_tui_inner(client, app, Some(config), security_receiver)
 }
 
+// Own the client and security receiver until the terminal session ends.
+#[allow(clippy::needless_pass_by_value)]
 fn run_tui_inner<T: Transport + Clone + Send + 'static>(
     client: ApiClient<T>,
     mut app: TuiApp,
@@ -541,11 +550,11 @@ fn run_tui_inner<T: Transport + Clone + Send + 'static>(
         run_event_loop(
             &mut terminal,
             &mut app,
-            client,
-            security_receiver,
-            event_sender,
-            event_receiver,
-            documents_loader,
+            &client,
+            &security_receiver,
+            &event_sender,
+            &event_receiver,
+            &documents_loader,
         )
     })();
 
@@ -558,11 +567,11 @@ fn run_tui_inner<T: Transport + Clone + Send + 'static>(
 fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
     terminal: &mut Terminal<B>,
     app: &mut TuiApp,
-    client: ApiClient<T>,
-    security_receiver: Receiver<Vec<SecurityFinding>>,
-    event_sender: Sender<TuiEvent>,
-    event_receiver: Receiver<TuiEvent>,
-    documents_loader: DocumentsLoader,
+    client: &ApiClient<T>,
+    security_receiver: &Receiver<Vec<SecurityFinding>>,
+    event_sender: &Sender<TuiEvent>,
+    event_receiver: &Receiver<TuiEvent>,
+    documents_loader: &DocumentsLoader,
 ) -> Result<(), AppError> {
     let mut redraw = false;
     let mut active_inspectors = HashSet::new();
@@ -594,8 +603,8 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     app.on_documents_page(documents, total, done);
                     request_selected_inspector(
                         app,
-                        &client,
-                        &event_sender,
+                        client,
+                        event_sender,
                         generation,
                         &mut active_inspectors,
                     );
@@ -617,13 +626,13 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     if loaded_generation == generation {
                         match result {
                             Ok(inspector) => app.on_inspector_loaded(document_id, inspector),
-                            Err(error) => app.on_inspector_error(document_id, error),
+                            Err(error) => app.on_inspector_error(document_id, &error),
                         }
                     }
                     request_selected_inspector(
                         app,
-                        &client,
-                        &event_sender,
+                        client,
+                        event_sender,
                         generation,
                         &mut active_inspectors,
                     );
@@ -692,8 +701,8 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                 if moved {
                     request_selected_inspector(
                         app,
-                        &client,
-                        &event_sender,
+                        client,
+                        event_sender,
                         generation,
                         &mut active_inspectors,
                     );
@@ -893,18 +902,18 @@ fn spawn_latest_task_loader<T: Transport + Clone + Send + 'static>(
 }
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
-    let rows = Layout::default()
+    let [overview_area, body_area, status_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(12),
             Constraint::Length(6),
         ])
-        .split(frame.area());
-    let body = Layout::default()
+        .areas(frame.area());
+    let [documents_area, inspector_area] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
-        .split(rows[1]);
+        .areas(body_area);
 
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
@@ -921,7 +930,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                 Some(total) if app.loading_documents => {
                     format!("{}/{} docs", app.loaded_document_count, total)
                 }
-                Some(total) => format!("{} docs", total),
+                Some(total) => format!("{total} docs"),
                 None if app.loading_documents => {
                     format!("{} docs loading", app.loaded_document_count)
                 }
@@ -931,7 +940,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
         ),
     ]))
     .block(Block::default().borders(Borders::ALL).title("Overview"));
-    frame.render_widget(title, rows[0]);
+    frame.render_widget(title, overview_area);
 
     let documents_block = Block::default().borders(Borders::ALL).title("Documents");
     let documents_block = if app.focus == PaneFocus::Documents {
@@ -939,21 +948,19 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     } else {
         documents_block
     };
-    let documents_inner = documents_block.inner(body[0]);
-    frame.render_widget(documents_block, body[0]);
+    let documents_inner = documents_block.inner(documents_area);
+    frame.render_widget(documents_block, documents_area);
 
     if documents_inner.width > 0 && documents_inner.height > 0 {
-        app.documents_viewport_height = documents_inner.height as usize;
-        let document_columns = if documents_inner.width > 2 {
-            Layout::default()
+        app.documents_viewport_height = usize::from(documents_inner.height);
+        let (list_area, scrollbar_area) = if documents_inner.width > 2 {
+            let [list, scrollbar] = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Min(1), Constraint::Length(1)])
-                .split(documents_inner)
+                .areas(documents_inner);
+            (list, Some(scrollbar))
         } else {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1)])
-                .split(documents_inner)
+            (documents_inner, None)
         };
 
         let selected = app
@@ -971,10 +978,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol("▶ ");
-        frame.render_stateful_widget(documents, document_columns[0], &mut viewport);
+        frame.render_stateful_widget(documents, list_area, &mut viewport);
         *app.documents_state.offset_mut() = offset + viewport.offset();
 
-        if document_columns.len() > 1 {
+        if let Some(scrollbar_area) = scrollbar_area {
             let content_length = app.documents.len() + usize::from(app.loading_documents);
             let viewport_height = app.documents_viewport_height;
             let mut scrollbar_state = ScrollbarState::new(content_length.max(1))
@@ -988,10 +995,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                     .thumb_symbol("█")
                     .track_style(Style::default().fg(Color::DarkGray))
                     .thumb_style(Style::default().fg(Color::Cyan)),
-                document_columns[1].inner(Margin {
-                    vertical: 0,
-                    horizontal: 0,
-                }),
+                scrollbar_area,
                 &mut scrollbar_state,
             );
         }
@@ -1004,7 +1008,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     } else {
         "Inspector"
     };
-    app.inspector_viewport_height = body[1].height.saturating_sub(2) as usize;
+    app.inspector_viewport_height = usize::from(inspector_area.height.saturating_sub(2));
     let inspector_body = if let Some(inspector) = app.current_inspector() {
         inspector.text.as_str()
     } else if app.loading_documents {
@@ -1015,7 +1019,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
         "Loading document text…"
     };
     let detail = Paragraph::new(inspector_body)
-        .scroll((app.inspector_scroll as u16, 0))
+        .scroll((u16::try_from(app.inspector_scroll).unwrap_or(u16::MAX), 0))
         .wrap(Wrap { trim: false })
         .block(
             Block::default()
@@ -1027,7 +1031,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                 })
                 .title(inspector_title),
         );
-    frame.render_widget(detail, body[1]);
+    frame.render_widget(detail, inspector_area);
 
     let metadata = Paragraph::new(
         app.selected_metadata()
@@ -1037,7 +1041,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     )
     .wrap(Wrap { trim: true })
     .block(Block::default().borders(Borders::ALL).title("Status"));
-    frame.render_widget(metadata, rows[2]);
+    frame.render_widget(metadata, status_area);
 }
 
 fn visible_document_items(
@@ -1080,7 +1084,7 @@ fn visible_document_items(
     (offset, items)
 }
 
-fn severity_label(severity: &Severity) -> &'static str {
+const fn severity_label(severity: &Severity) -> &'static str {
     match severity {
         Severity::Critical => "critical",
         Severity::High => "high",
@@ -1135,6 +1139,7 @@ mod loader_tests {
     use super::*;
     use crate::api::{Endpoint, RequestData, ResponseData};
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     type PendingResponse = (RequestData, Sender<Value>);
 
@@ -1149,7 +1154,7 @@ mod loader_tests {
             Ok(ResponseData {
                 status: 200,
                 url: "http://localhost/api/documents/".to_string(),
-                headers: Default::default(),
+                headers: BTreeMap::default(),
                 body: serde_json::to_vec(&data).unwrap(),
             })
         }
@@ -1243,7 +1248,7 @@ mod loader_tests {
     fn a_failed_inspector_can_retry_when_the_user_returns_to_it() {
         let mut app = test_app(2);
         assert_eq!(app.maybe_request_inspector(), Some(1));
-        app.on_inspector_error(1, "HTTP 403 Forbidden".to_string());
+        app.on_inspector_error(1, "HTTP 403 Forbidden");
         assert_eq!(app.pending_inspector_id, None);
         assert!(!app.loading_inspector);
         assert_eq!(app.maybe_request_inspector(), None);

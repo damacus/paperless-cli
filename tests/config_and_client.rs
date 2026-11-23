@@ -1,5 +1,48 @@
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::exit,
+    clippy::disallowed_methods,
+    clippy::dbg_macro,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unreachable,
+    clippy::undocumented_unsafe_blocks,
+    clippy::as_conversions
+)]
+#![allow(
+    // Transitive duplicate versions are outside our control.
+    clippy::multiple_crate_versions,
+    // Error behaviour is documented at module level, not via per-fn
+    // `# Errors` sections; the public surface is consumed internally.
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    // Function length is governed by cognitive-complexity, not lines.
+    clippy::too_many_lines,
+    // Licence/keyword metadata is a maintainer decision, not a lint.
+    clippy::cargo_common_metadata,
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::unreachable,
+        clippy::disallowed_methods,
+        clippy::future_not_send,
+    )
+)]
+
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,9 +64,32 @@ struct MockTransport {
     responses: Arc<Mutex<VecDeque<Result<ResponseData, AppError>>>>,
 }
 
-static ENV_LOCK: Mutex<()> = Mutex::new(());
+const CONFIG_TEST_CASE: &str = "PAPERLESS_CLI_CONFIG_TEST_CASE";
+
+// Give each scenario its own process environment while tests run in parallel.
+fn run_config_test(test: &str, case: &str, url: Option<&str>, token: Option<&str>) {
+    let mut child = Command::new(std::env::current_exe().unwrap());
+    child.args(["--exact", test]).env(CONFIG_TEST_CASE, case);
+    for (name, value) in [("PAPERLESS_URL", url), ("PAPERLESS_TOKEN", token)] {
+        if let Some(value) = value {
+            child.env(name, value);
+        } else {
+            child.env_remove(name);
+        }
+    }
+    let output = child.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("running 1 test"),
+        "{}\n{}",
+        stdout,
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
 
 impl MockTransport {
+    // Let fixtures pass inline JSON values directly into the response builder.
+    #[allow(clippy::needless_pass_by_value)]
     fn push_json(&self, status: u16, url: &str, body: serde_json::Value) {
         self.responses.lock().unwrap().push_back(Ok(ResponseData {
             status,
@@ -59,10 +125,14 @@ impl Transport for MockTransport {
 
 #[test]
 fn config_roundtrip_redacts_token_and_persists_session() {
-    let _env_lock = ENV_LOCK.lock().unwrap();
-    unsafe {
-        std::env::remove_var("PAPERLESS_URL");
-        std::env::remove_var("PAPERLESS_TOKEN");
+    if std::env::var_os(CONFIG_TEST_CASE).is_none() {
+        run_config_test(
+            "config_roundtrip_redacts_token_and_persists_session",
+            "persisted",
+            None,
+            None,
+        );
+        return;
     }
     let temp = tempdir().unwrap();
     let paths = AppPaths::new(
@@ -94,11 +164,6 @@ fn config_roundtrip_redacts_token_and_persists_session() {
     assert_eq!(restored.last_query, "invoice");
     assert_eq!(restored.selected_docs, vec![1, 2]);
     assert_eq!(restored.history, vec!["documents list"]);
-
-    unsafe {
-        std::env::remove_var("PAPERLESS_URL");
-        std::env::remove_var("PAPERLESS_TOKEN");
-    }
 }
 
 #[cfg(unix)]
@@ -133,25 +198,34 @@ fn masked_token_handles_multibyte_prefixes_without_panicking() {
     )
     .unwrap();
 
-    assert_eq!(config.masked_token(), "秘密令牌🙂abc...")
+    assert_eq!(config.masked_token(), "秘密令牌🙂abc...");
 }
 
 #[test]
 fn load_config_allows_env_only_and_env_override() {
-    let _env_lock = ENV_LOCK.lock().unwrap();
+    let Some(case) = std::env::var_os(CONFIG_TEST_CASE) else {
+        let test = "load_config_allows_env_only_and_env_override";
+        run_config_test(
+            test,
+            "environment",
+            Some("https://env.example.com"),
+            Some("env-token"),
+        );
+        run_config_test(test, "override", Some("https://override.example.com"), None);
+        return;
+    };
     let temp = tempdir().unwrap();
     let paths = AppPaths::new(
         temp.path().join("config.toml"),
         temp.path().join("session.toml"),
     );
 
-    unsafe {
-        std::env::set_var("PAPERLESS_URL", "https://env.example.com");
-        std::env::set_var("PAPERLESS_TOKEN", "env-token");
+    if case == "environment" {
+        let env_only = load_config(&paths).unwrap();
+        assert_eq!(env_only.base_url, "https://env.example.com");
+        assert_eq!(env_only.token, "env-token");
+        return;
     }
-    let env_only = load_config(&paths).unwrap();
-    assert_eq!(env_only.base_url, "https://env.example.com");
-    assert_eq!(env_only.token, "env-token");
 
     let persisted = AppConfig::new(
         "https://persisted.example.com",
@@ -161,18 +235,9 @@ fn load_config_allows_env_only_and_env_override() {
     .unwrap();
     save_config(&paths, &persisted).unwrap();
 
-    unsafe {
-        std::env::set_var("PAPERLESS_URL", "https://override.example.com");
-        std::env::remove_var("PAPERLESS_TOKEN");
-    }
     let merged = load_config(&paths).unwrap();
     assert_eq!(merged.base_url, "https://override.example.com");
     assert_eq!(merged.token, "persisted-token");
-
-    unsafe {
-        std::env::remove_var("PAPERLESS_URL");
-        std::env::remove_var("PAPERLESS_TOKEN");
-    }
 }
 
 #[test]
@@ -380,7 +445,7 @@ fn upload_and_update_requests_encode_expected_payloads() {
     services::upload_document(
         &client,
         &UploadRequest {
-            path: file_path.clone(),
+            path: file_path,
             title: Some("Invoice".to_string()),
             correspondent_id: Some(9),
             document_type_id: Some(3),
