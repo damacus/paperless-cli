@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use crate::api::{fetch_token, multipart_file_from_path, ApiClient, Transport};
+use crate::api::{
+    fetch_token, multipart_file_from_path, ApiClient, RequestData, ResponseData, Transport,
+};
 use crate::config::{
     load_config, load_session, normalize_url, save_config, save_session, AppConfig, AppPaths,
     OutputMode, SessionState,
@@ -621,14 +624,74 @@ pub fn operational_overview<T: Transport>(
     client: &ApiClient<T>,
     config: &AppConfig,
 ) -> Result<Value, AppError> {
-    let status = status(client, config)?;
-    let statistics = client.get_json("statistics/", Vec::new())?;
-    let tasks = list_tasks(client)?;
-    Ok(json!({
+    Ok(overview_payload(
+        status(client, config)?,
+        client.get_json("statistics/", Vec::new())?,
+        list_tasks(client)?,
+    ))
+}
+
+pub fn operational_overview_parallel<T: Transport + Sync>(
+    client: &ApiClient<T>,
+    config: &AppConfig,
+) -> Result<Value, AppError> {
+    let cancelled = AtomicBool::new(false);
+    let (status, statistics, tasks) = std::thread::scope(|scope| {
+        let statistics = scope.spawn(|| {
+            let result = client.get_json("statistics/", Vec::new());
+            if result.is_err() {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+            result
+        });
+        let tasks = scope.spawn(|| {
+            let task_client = ApiClient::new(OverviewTasks {
+                transport: client.transport(),
+                cancelled: &cancelled,
+            });
+            list_tasks(&task_client)
+        });
+        let status = status(client, config);
+        if status.is_err() {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+        (
+            status,
+            statistics.join().unwrap_or_else(|_| {
+                Err(AppError::Message(
+                    "Statistics worker stopped unexpectedly".to_string(),
+                ))
+            }),
+            tasks.join().unwrap_or_else(|_| {
+                Err(AppError::Message(
+                    "Tasks worker stopped unexpectedly".to_string(),
+                ))
+            }),
+        )
+    });
+    Ok(overview_payload(status?, statistics?, tasks?))
+}
+
+fn overview_payload(status: Value, statistics: Value, tasks: Value) -> Value {
+    json!({
         "status": status,
         "statistics": statistics,
         "tasks": tasks,
-    }))
+    })
+}
+
+struct OverviewTasks<'a, T> {
+    transport: &'a T,
+    cancelled: &'a AtomicBool,
+}
+
+impl<T: Transport> Transport for OverviewTasks<'_, T> {
+    fn send(&self, request: RequestData) -> Result<ResponseData, AppError> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(AppError::Message("Dashboard request cancelled".to_string()));
+        }
+        self.transport.send(request)
+    }
 }
 
 pub fn dashboard<T: Transport>(

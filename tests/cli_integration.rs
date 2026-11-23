@@ -192,6 +192,64 @@ fn dashboard_fetches_the_explicit_operational_overview() {
 }
 
 #[test]
+fn dashboard_keeps_the_status_fallback_and_all_task_pages() {
+    let server = MockServer::start();
+    let status = server.mock(|when, then| {
+        when.method(GET).path("/api/status/");
+        then.status(403)
+            .json_body(serde_json::json!({"detail": "Forbidden"}));
+    });
+    let probe = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/documents/")
+            .query_param("page_size", "1");
+        then.status(200)
+            .json_body(serde_json::json!({"count": 2, "results": [{"id": 1}]}));
+    });
+    let statistics = server.mock(|when, then| {
+        when.method(GET).path("/api/statistics/");
+        then.status(200)
+            .json_body(serde_json::json!({"documents_total": 2}));
+    });
+    let first = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/tasks/")
+            .query_param("page_size", "100");
+        then.status(200).json_body(serde_json::json!({
+            "results": [{"id": 901}], "next": format!("{}/api/tasks/?page=2", server.base_url()),
+        }));
+    });
+    let second = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/tasks/")
+            .query_param("page", "2");
+        then.status(200)
+            .json_body(serde_json::json!({"results": [{"id": 900}], "next": null}));
+    });
+
+    let (_dir, config, session) = base_env();
+    let output = Command::new(env!("CARGO_BIN_EXE_paperless"))
+        .env("PAPERLESS_CONFIG_PATH", &config)
+        .env("PAPERLESS_SESSION_PATH", &session)
+        .env("PAPERLESS_URL", server.base_url())
+        .env("PAPERLESS_TOKEN", "env-token")
+        .args(["--json", "dashboard"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output["data"]["status"]["response"]["count"], 2);
+    assert_eq!(output["data"]["statistics"]["documents_total"], 2);
+    assert_eq!(
+        output["data"]["tasks"],
+        serde_json::json!([{"id": 901}, {"id": 900}])
+    );
+    for mock in [status, probe, statistics, first, second] {
+        mock.assert_calls(1);
+    }
+}
+
+#[test]
 fn login_with_token_writes_config() {
     let server = MockServer::start();
     server.mock(|when, then| {

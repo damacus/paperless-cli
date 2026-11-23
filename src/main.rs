@@ -13,16 +13,15 @@ use paperless_cli::render::render_output;
 use paperless_cli::security::{SecurityAgentProfile, SecurityAuditor};
 use paperless_cli::services::{
     audit_state, autocomplete_search, bulk_download, bulk_download_zip, connection_info,
-    create_correspondent, create_document_type, create_tag, dashboard, delete_correspondent,
-    delete_document, delete_document_type, delete_tag, download_document, download_preview,
-    download_thumbnail, edit_document, get_correspondent, get_document, get_document_content,
-    get_document_type, get_tag, get_task, init_connection, list_correspondents,
-    list_document_types, list_documents, list_tags, list_tasks, operational_overview,
-    persist_session, ping, query_search, sanitize_filename, search_documents, status,
-    update_document, update_tag, upload_document, DocumentQuery, OutputEnvelope, TagUpdateRequest,
-    UpdateRequest, UploadRequest,
+    create_correspondent, create_document_type, create_tag, delete_correspondent, delete_document,
+    delete_document_type, delete_tag, download_document, download_preview, download_thumbnail,
+    edit_document, get_correspondent, get_document, get_document_content, get_document_type,
+    get_tag, get_task, init_connection, list_correspondents, list_document_types, list_documents,
+    list_tags, list_tasks, operational_overview_parallel, persist_session, ping, query_search,
+    sanitize_filename, search_documents, status, update_document, update_tag, upload_document,
+    DocumentQuery, OutputEnvelope, TagUpdateRequest, UpdateRequest, UploadRequest,
 };
-use paperless_cli::tui::run_tui;
+use paperless_cli::tui::run_connecting_tui;
 use serde_json::json;
 
 #[derive(Parser, Debug)]
@@ -383,16 +382,14 @@ fn run_interactive(
     let shared_state = Arc::new(Mutex::new(audit_state(paths, Some(&config), None)));
     let findings = auditor.review_once(&shared_state.lock().unwrap().clone());
     let receiver = auditor.spawn(shared_state);
-    let snapshot = dashboard(&client, &config, findings)?;
-    run_tui(client, snapshot, receiver)
+    run_connecting_tui(client, config, findings, receiver)
 }
 
 fn run_demo_interactive(output: OutputMode, _no_color: bool) -> Result<(), AppError> {
     let config = demo_config(output);
     let client = ApiClient::new(DemoTransport::new());
-    let snapshot = dashboard(&client, &config, Vec::new())?;
     let (_sender, receiver) = std::sync::mpsc::channel();
-    run_tui(client, snapshot, receiver)
+    run_connecting_tui(client, config, Vec::new(), receiver)
 }
 
 fn run_command(
@@ -832,7 +829,7 @@ fn run_command(
             OutputEnvelope {
                 mode: output_name(output).to_string(),
                 command: "dashboard".to_string(),
-                data: operational_overview(&client, &config)?,
+                data: operational_overview_parallel(&client, &config)?,
                 security: auditor.review_once(&audit_state(paths, Some(&config), None)),
             }
         }
@@ -1237,7 +1234,7 @@ fn run_demo_command(
         RootCommand::Dashboard => OutputEnvelope {
             mode: output_name(output).to_string(),
             command: "dashboard".to_string(),
-            data: operational_overview(&client, &config)?,
+            data: operational_overview_parallel(&client, &config)?,
             security: Vec::new(),
         },
         RootCommand::Status => OutputEnvelope {
