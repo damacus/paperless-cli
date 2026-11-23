@@ -202,6 +202,17 @@ impl TuiApp {
         self.project_summary = format!("error {message}");
     }
 
+    fn on_latest_task(&mut self, result: Result<Option<TaskSummary>, String>) {
+        self.loading_task = false;
+        match result {
+            Ok(task) => {
+                self.latest_task = task;
+                self.task_error = None;
+            }
+            Err(error) => self.task_error = Some(error),
+        }
+    }
+
     pub fn request_documents_reload(&mut self) {
         self.loading_documents = true;
         self.documents.clear();
@@ -484,16 +495,7 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     Ok(inspector) => app.on_inspector_loaded(document_id, inspector),
                     Err(error) => app.on_loader_error(error),
                 },
-                TuiEvent::LatestTask(result) => {
-                    app.loading_task = false;
-                    match result {
-                        Ok(task) => {
-                            app.latest_task = task;
-                            app.task_error = None;
-                        }
-                        Err(error) => app.task_error = Some(error),
-                    }
-                }
+                TuiEvent::LatestTask(result) => app.on_latest_task(result),
             }
         }
 
@@ -806,5 +808,46 @@ fn severity_label(severity: &Severity) -> &'static str {
         Severity::High => "high",
         Severity::Medium => "medium",
         Severity::Low => "low",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_task_error_leaves_document_loading_independent() {
+        let mut app = TuiApp::from_snapshot(DashboardSnapshot {
+            project: serde_json::json!({"url": "https://paperless.example.com"}),
+            documents: vec![],
+            latest_task: None,
+            security: vec![],
+        });
+        app.loading_task = true;
+
+        app.on_latest_task(Err("HTTP 403 Forbidden".to_string()));
+        assert!(app.loading_documents);
+        assert!(!app.loading_task);
+        assert!(app
+            .selected_metadata()
+            .iter()
+            .any(|line| { line == "latest task unavailable: HTTP 403 Forbidden" }));
+        assert_eq!(
+            app.on_documents_page(
+                vec![DocumentSummary {
+                    id: 42,
+                    title: "Invoice".to_string(),
+                    created: "2026-11-18".to_string(),
+                }],
+                Some(1),
+                true,
+            ),
+            Some(42)
+        );
+        assert_eq!(app.current_document_id(), Some(42));
+        assert!(!app.loading_documents);
+
+        app.on_latest_task(Ok(None));
+        assert!(app.task_error.is_none());
     }
 }
