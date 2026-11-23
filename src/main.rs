@@ -117,7 +117,9 @@ enum RootCommand {
     Export(ExportCommand),
     /// Fetch status, statistics, and tasks for a full operational overview.
     Dashboard,
-    /// Check server health and authentication using only GET /api/status/.
+    /// Check server health and authentication.
+    ///
+    /// Queries GET /api/status/. On HTTP 403, tries a one-document probe.
     Status,
 }
 
