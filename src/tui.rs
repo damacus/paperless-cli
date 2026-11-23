@@ -464,12 +464,17 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
     event_sender: Sender<TuiEvent>,
     event_receiver: Receiver<TuiEvent>,
 ) -> Result<(), AppError> {
+    let mut redraw = false;
     loop {
         while let Ok(findings) = security_receiver.try_recv() {
-            app.on_security_update(findings);
+            if app.security != findings {
+                app.on_security_update(findings);
+                redraw = true;
+            }
         }
 
         while let Ok(event) = event_receiver.try_recv() {
+            redraw = true;
             match event {
                 TuiEvent::Connected(result) => {
                     app.project_summary = project_summary(&result?);
@@ -499,16 +504,23 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
             }
         }
 
-        terminal
-            .draw(|frame| draw(frame, app))
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        if redraw {
+            terminal
+                .draw(|frame| draw(frame, app))
+                .map_err(|error| AppError::Message(error.to_string()))?;
+            redraw = false;
+        }
 
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
+            let event = event::read()?;
+            redraw = matches!(event, Event::Resize(..));
+            if let Event::Key(key) = event {
+                let previous_scroll = app.inspector_scroll;
                 let moved = match key.code {
                     KeyCode::Char('q') => return Ok(()),
                     KeyCode::Tab => {
                         app.toggle_focus();
+                        redraw = true;
                         false
                     }
                     KeyCode::Char('j') | KeyCode::Down => match app.focus {
@@ -537,6 +549,7 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     },
                     KeyCode::Char('r') if !app.connecting => {
                         app.request_documents_reload();
+                        redraw = true;
                         spawn_documents_loader(client.clone(), event_sender.clone());
                         if !app.loading_task {
                             app.loading_task = true;
@@ -546,6 +559,7 @@ fn run_event_loop<B: Backend, T: Transport + Clone + Send + 'static>(
                     }
                     _ => false,
                 };
+                redraw |= moved || previous_scroll != app.inspector_scroll;
 
                 if moved {
                     if let Some(document_id) = app.maybe_request_inspector() {
@@ -683,26 +697,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     .block(Block::default().borders(Borders::ALL).title("Overview"));
     frame.render_widget(title, rows[0]);
 
-    let document_items = if app.loading_documents && app.documents.is_empty() {
-        vec![ListItem::new("Loading first page…")]
-    } else if app.documents.is_empty() {
-        vec![ListItem::new("No documents loaded.")]
-    } else {
-        let mut items = app
-            .documents
-            .iter()
-            .map(|document| {
-                ListItem::new(format!(
-                    "{:>5}  {}  {}",
-                    document.id, document.created, document.title
-                ))
-            })
-            .collect::<Vec<_>>();
-        if app.loading_documents {
-            items.push(ListItem::new("… loading more"));
-        }
-        items
-    };
     let documents_block = Block::default().borders(Borders::ALL).title("Documents");
     let documents_block = if app.focus == PaneFocus::Documents {
         documents_block.border_style(Style::default().fg(Color::Cyan))
@@ -726,6 +720,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                 .split(documents_inner)
         };
 
+        let selected = app
+            .documents_state
+            .selected()
+            .filter(|_| !app.documents.is_empty())
+            .map(|index| index.min(app.documents.len() - 1));
+        let (offset, document_items) = visible_document_items(app, selected);
+        let mut viewport = ListState::default().with_selected(selected.map(|index| index - offset));
         let documents = List::new(document_items)
             .highlight_style(
                 Style::default()
@@ -734,7 +735,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol("▶ ");
-        frame.render_stateful_widget(documents, document_columns[0], &mut app.documents_state);
+        frame.render_stateful_widget(documents, document_columns[0], &mut viewport);
+        *app.documents_state.offset_mut() = offset + viewport.offset();
 
         if document_columns.len() > 1 {
             let content_length = app.documents.len() + usize::from(app.loading_documents);
@@ -766,16 +768,16 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     } else {
         "Inspector"
     };
-    let inspector_body = if let Some(inspector) = app.current_inspector() {
-        inspector.text.clone()
-    } else if app.loading_documents {
-        "Loading document list…".to_string()
-    } else if app.documents.is_empty() {
-        "No document selected.".to_string()
-    } else {
-        "Loading document text…".to_string()
-    };
     app.inspector_viewport_height = body[1].height.saturating_sub(2) as usize;
+    let inspector_body = if let Some(inspector) = app.current_inspector() {
+        inspector.text.as_str()
+    } else if app.loading_documents {
+        "Loading document list…"
+    } else if app.documents.is_empty() {
+        "No document selected."
+    } else {
+        "Loading document text…"
+    };
     let detail = Paragraph::new(inspector_body)
         .scroll((app.inspector_scroll as u16, 0))
         .wrap(Wrap { trim: false })
@@ -800,6 +802,46 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut TuiApp) {
     .wrap(Wrap { trim: true })
     .block(Block::default().borders(Borders::ALL).title("Status"));
     frame.render_widget(metadata, rows[2]);
+}
+
+fn visible_document_items(
+    app: &TuiApp,
+    selected: Option<usize>,
+) -> (usize, Vec<ListItem<'static>>) {
+    if app.documents.is_empty() {
+        let message = if app.loading_documents {
+            "Loading first page…"
+        } else {
+            "No documents loaded."
+        };
+        return (0, vec![ListItem::new(message)]);
+    }
+
+    let item_count = app.documents.len() + usize::from(app.loading_documents);
+    let height = app.documents_viewport_height;
+    let mut offset = app.documents_state.offset().min(item_count - 1);
+    if let Some(selected) = selected {
+        // Each item needs at least one row. Anything earlier cannot fit alongside
+        // the selection. Ratatui accounts for multiline items inside this window.
+        offset = offset.clamp(selected.saturating_sub(height - 1), selected);
+    }
+    let end = offset.saturating_add(height);
+    let mut items = app
+        .documents
+        .iter()
+        .skip(offset)
+        .take(height)
+        .map(|document| {
+            ListItem::new(format!(
+                "{:>5}  {}  {}",
+                document.id, document.created, document.title
+            ))
+        })
+        .collect::<Vec<_>>();
+    if app.loading_documents && end > app.documents.len() {
+        items.push(ListItem::new("… loading more"));
+    }
+    (offset, items)
 }
 
 fn severity_label(severity: &Severity) -> &'static str {
