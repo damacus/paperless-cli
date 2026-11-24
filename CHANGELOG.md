@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.1.6](https://github.com/damacus/paperless-cli/compare/v2.1.5...v2.1.6) (2026-11-23)
+
+
+### Bug Fixes
+
+* avoid redundant Paperless requests ([#46](https://github.com/damacus/paperless-cli/issues/46)) ([54ba2f8](https://github.com/damacus/paperless-cli/commit/54ba2f8e804a408992fb26bc248e71df906a267c))
+* limit TUI inspector memory and loaders ([#51](https://github.com/damacus/paperless-cli/issues/51)) ([10d9da4](https://github.com/damacus/paperless-cli/commit/10d9da425a6215c1e74579e83c3d488072c88a38))
+* render only visible TUI document rows ([#50](https://github.com/damacus/paperless-cli/issues/50)) ([c31d8ff](https://github.com/damacus/paperless-cli/commit/c31d8ffd86089397c3ff12c61cc3bb1cf548a992))
+* speed up dashboard and TUI startup ([#48](https://github.com/damacus/paperless-cli/issues/48)) ([23a6fb8](https://github.com/damacus/paperless-cli/commit/23a6fb81d9b727aec21c34bf3a66c71c1dd20b08))
+* strip Linux release executable symbols ([#49](https://github.com/damacus/paperless-cli/issues/49)) ([301c7a0](https://github.com/damacus/paperless-cli/commit/301c7a093a0cd13ded82644ac499720f93ba5707))
+
+
+### Performance Improvements
+
+* reduce inspector and JSON allocation ([#54](https://github.com/damacus/paperless-cli/issues/54)) ([c83c55d](https://github.com/damacus/paperless-cli/commit/c83c55d771858a272bc73733075ffb8b7a57712a))
+* stream document uploads and downloads ([#53](https://github.com/damacus/paperless-cli/issues/53)) ([fce8be1](https://github.com/damacus/paperless-cli/commit/fce8be16f9b0c8c0c7cf04dcd09653d491d25841))
+
 ## [2.1.5](https://github.com/damacus/paperless-cli/compare/v2.1.4...v2.1.5) (2026-11-23)
 
 
