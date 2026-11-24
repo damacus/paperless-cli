@@ -58,13 +58,20 @@ paperless dashboard
 
 ## TUI overview
 
-The default TUI is a two-pane document browser:
+The default TUI is a two-pane document browser. It opens while it checks the
+connection, then loads documents page by page and fetches the latest task
+separately. A task permission error appears in the Status pane while document
+browsing remains available.
 
 - `Tab` switches focus between the Documents list and the Inspector
 - `j/k` or arrows move within the focused pane
 - `PgUp/PgDn` page through the focused pane
 - `g/G` jump to the top or bottom of the focused pane
-- `r` reloads the document list
+- `r` reloads the document list and latest task and clears the Inspector cache
+- `q` quits the browser
+
+The Inspector keeps up to 16 MiB of recently fetched entries for back
+navigation. It displays larger documents while they are selected.
 
 For fast iteration on layout and keyboard behavior, use `paperless --demo`.
 
@@ -88,17 +95,18 @@ For fast iteration on layout and keyboard behavior, use `paperless --demo`.
 
 ### Network behavior
 
-`paperless status` is a compact health and authentication probe. It sends only
-`GET /api/status/` and does not fetch statistics, tasks, documents, or history.
-The default terminal view uses ASCII formatting to summarize component health,
-versions, migrations, and storage. `--output json` preserves the complete API
-response for scripts.
+`paperless status` checks health and authentication with `GET /api/status/`.
+If the server returns HTTP 403, it tries `GET /api/documents/?page_size=1` to
+check access. When the status endpoint is available, the terminal view shows
+component health, versions, migrations and storage. `--output json` includes
+the response from the successful probe.
 
-`paperless dashboard` is the explicit full operational overview. It sends:
+`paperless dashboard` loads the full operational overview. It checks status
+and requests statistics and the complete task list concurrently.
 
-- `GET /api/status/`
-- `GET /api/statistics/`
-- `GET /api/tasks/`
+Document downloads and bulk ZIP exports move into place after the response
+completes. An interrupted transfer preserves any existing destination file.
+New downloads on Unix use owner-only permissions.
 
 Help is always local and network-free, including `paperless --help`,
 `paperless help <command>`, and `paperless <command> --help`.
